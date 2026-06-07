@@ -1,148 +1,139 @@
 # Agents Guide
 
-This repository currently contains the product blueprint for a Telegram Stars
-prediction-market MVP. Treat `prediction_market_mvp_plan.md` as the source of
-truth until implementation files are added.
+This file is the working memory for future agents on this repository. Update it
+after every meaningful architecture, deployment, environment, or module change.
 
-## Project Summary
+## Current State
 
 - Product: Telegram bot plus Mini App for group prediction markets.
-- Stack: Python 3.11+, aiogram 3.x, React, Tailwind, PostgreSQL via Supabase,
-  Railway for the bot/API, Vercel for the Mini App.
-- Currency model: Telegram Stars are converted to internal credits at 1:1.
-- Timeline: 3-week MVP split into 14 modules.
+- Stack: Python 3.11+, aiogram 3.x, aiohttp, SQLAlchemy async, asyncpg,
+  PostgreSQL/Supabase, Hugging Face Spaces Docker, Cloudflare Worker proxy.
+- Source plan: `prediction_market_mvp_plan.md`.
+- Implemented modules:
+  - Module 1: infrastructure, config, webhook setup, DB engine factory,
+    Docker/Hugging Face scaffolding, logging, exception handling.
+  - Module 2: webhook secret validation, Telegram Mini App `initData`
+    validation, admin check, admin middleware, logging, exception handling.
+  - User-facing `/start` route: sends `bot/assets/start_message.png` with
+    Markdown caption and an Open button.
 
-## Repository State
+## Important Repos And Deploys
 
-- `prediction_market_mvp_plan.md` is the only functional project artifact at
-  the time this guide was created.
-- There is no application code, package metadata, test suite, or deployment
-  config yet.
-- When code is introduced, keep the planned top-level structure unless the
-  user changes direction:
-  - `bot/` for aiogram handlers, routers, middleware, and bot setup.
-  - `api/` for Mini App backend endpoints and webhook handling.
-  - `frontend/` for the React/Tailwind Telegram Mini App.
-  - `migrations/` for Alembic database migrations.
+- GitHub: `https://github.com/jxlsij/poolr`
+- Hugging Face Space: `https://huggingface.co/spaces/amiasayedau/poolr`
+- Public Space URL: `https://amiasayedau-poolr.hf.space`
+- Cloudflare Worker is used as Telegram API proxy because the Hugging Face free
+  runtime can block direct outbound calls to `api.telegram.org`.
 
-## Critical Product Rules
+## Project Layout
+
+- `main.py`: aiohttp app entrypoint, health-check, aiogram webhook mounting,
+  webhook registration, custom Telegram API endpoint support.
+- `bot/config.py`: `Config`, `.env`/environment loading, config validation,
+  redacted config logging.
+- `bot/infrastructure.py`: `setup_webhook`, `create_db_pool`, async PostgreSQL
+  URL normalization, infrastructure errors.
+- `bot/security.py`: Module 2 security functions and `AdminMiddleware`.
+- `bot/handlers/start.py`: `/start` handler and Open button composition.
+- `bot/assets/start_message.png`: image sent by `/start`.
+- `api/`: reserved for Mini App backend endpoints.
+- `frontend/`: reserved for React/Tailwind Mini App.
+- `migrations/`: reserved for Alembic migrations.
+- `tests/`: focused tests for config, infrastructure, and security helpers.
+- `deploy guides/`: user-provided Hugging Face/Cloudflare deployment guide.
+
+## Environment Variables
+
+Required in production:
+
+- `BOT_TOKEN`: Telegram bot token from BotFather.
+- `DATABASE_URL` or `DB_URL`: PostgreSQL/Supabase connection string.
+- `WEBHOOK_URL`: public webhook URL, currently the HF Space URL.
+- `WEBHOOK_SECRET`: Telegram webhook secret token.
+- `TELEGRAM_API_URL`: Cloudflare Worker API base in guide format, e.g.
+  `https://xxx.workers.dev/bot{0}/{1}`. The code normalizes this for aiogram.
+
+Optional:
+
+- `MINI_APP_URL`: Open button URL for `/start`. Falls back to `WEBHOOK_URL`.
+- `PLATFORM_FEE_PCT`: defaults to `0.08`.
+- `ADMIN_IDS`: comma/space-separated Telegram user IDs.
+- `LOG_LEVEL`: defaults to `INFO`.
+- `PORT`: defaults to `7860`.
+
+Never commit real secrets or real `.env` files.
+
+## Telegram Stars Rules
 
 - The bot cannot send Stars directly. Withdrawals must use
   `refundStarPayment` against original Telegram payment `charge_id` values.
-- Store every deposit `charge_id` permanently. Withdrawal logic depends on
-  these IDs.
-- Handle `pre_checkout_query` quickly. Telegram requires
-  `answerPreCheckoutQuery` within 10 seconds or the Stars charge will not
-  complete.
-- Mini App API endpoints must validate Telegram `initData`.
-- Webhook requests must verify the configured Telegram secret token.
-- Market creators cannot bet on their own markets.
-- Market deadlines must stay within the planned range: 15 minutes to 7 days.
-- Disputes can freeze markets and require admin arbitration.
+- Store every deposit `charge_id` permanently.
+- Use `currency="XTR"` for Stars invoices.
+- `answerPreCheckoutQuery` must happen within 10 seconds.
+- On `successful_payment`, save `telegram_payment_charge_id` before crediting
+  user balance.
+
+## Security Rules
+
+- Telegram webhook auth is a constant-time comparison of
+  `X-Telegram-Bot-Api-Secret-Token` with `WEBHOOK_SECRET`.
+- Telegram Mini App auth uses HMAC-SHA256:
+  - secret key: HMAC-SHA256 of bot token with key `WebAppData`;
+  - data check string: sorted initData fields excluding `hash`.
+- `validate_webapp_init_data` returns parsed data or `None`; it must not leak
+  bot tokens, hashes, or raw initData into logs.
+- `AdminMiddleware` should be attached only to admin-only routers/handlers.
+
+## Architecture Conventions
+
+- Keep `main.py` small: app creation, wiring, health-check, deployment glue.
+- Add bot handlers under `bot/handlers/`.
+- Keep business logic out of handlers; future modules should use service
+  modules for users, deposits, markets, bets, payouts, withdrawals, disputes,
+  and notifications.
+- Keep reusable validation/security in dedicated modules such as
+  `bot/security.py`.
+- Keep static bot assets under `bot/assets/`, not in the repository root.
+- If a new module changes architecture, environment variables, deployment,
+  folder layout, or user-facing behavior, update this `agents.md` in the same
+  change.
 
 ## Implementation Order
 
-Follow the dependency chain from the plan:
+Continue following the dependency chain from the plan:
 
-1. Infrastructure, config, webhook, database pool.
-2. Authentication and security middleware.
-3. Database schema, ORM models, and CRUD layer.
-4. User commands and profile flow.
-5. Stars payment intake and credit accounting.
-6. Market creation flow and market card publishing.
-7. Betting engine and market card updates.
-8. Resolution and payout distribution.
-9. Withdrawals via FIFO `charge_id` refunds.
-10. Anti-fraud, disputes, notifications, API, admin, deployment, monitoring.
+1. Module 3: database schema, ORM models, migrations, CRUD layer.
+2. Module 4: user commands/profile flow, building on current `/start`.
+3. Module 5: Stars payment intake and credit accounting.
+4. Module 6: market creation flow and market card publishing.
+5. Module 7: betting engine and market card updates.
+6. Module 8: resolution and payout distribution.
+7. Module 9: withdrawals via FIFO `charge_id` refunds.
+8. Modules 10-14: anti-fraud, disputes, notifications, API, admin, deployment,
+   monitoring.
 
-Do not build later modules on temporary storage. Module 3 is a prerequisite for
-nearly everything else.
+Do not build later modules on temporary storage. Module 3 is the next major
+foundation.
 
-## Suggested Architecture
+## Testing And Verification
 
-- Keep business logic separate from Telegram handlers. Handlers should parse
-  events, call services, and format responses.
-- Use explicit service boundaries for users, deposits, markets, bets, payouts,
-  withdrawals, disputes, and notifications.
-- Use database transactions for balance-changing operations:
-  - deposits and crediting balance
-  - placing bets and debiting balance
-  - resolving markets and distributing payouts
-  - withdrawals and recording refunded charge IDs
-- Add an audit trail for every balance mutation. The plan already names
-  reasons such as `bet_placed`, `payout_received`, and `withdrawal`.
-- Prefer enums for statuses and validation errors:
-  - market status
-  - deposit status
-  - withdrawal status
-  - dispute status
-  - bet validation errors
-  - suspicion level
+- Current local Python does not have `pytest` installed; `python3 -m pytest -q`
+  fails with `No module named pytest`.
+- Manual checks used so far:
+  - `python3 -m compileall bot tests main.py`
+  - targeted smoke scripts for config, infrastructure, security, and `/start`.
+- `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
+  test suite.
+- After deployment changes, verify:
+  - HF Space health-check returns `200 OK`;
+  - logs include `Telegram webhook set successfully`;
+  - logs include `Webhook setup result: True`;
+  - secrets are redacted in logs.
 
-## Database Expectations
+## Open Questions
 
-The initial schema should include:
-
-- `users`: Telegram identity, username, credit balance, ban state, timestamps.
-- `deposits`: user, Stars amount, `charge_id`, status, timestamps.
-- `markets`: creator, chat, message ID, question, options JSON, deadline,
-  minimum bet, status, timestamps.
-- `bets`: user, market, option index, credit amount, timestamp.
-- `payouts`: user, market, credits won, resolution timestamp.
-- `withdrawals`: user, credit amount, used charge IDs JSON, status, timestamp.
-- `disputes`: market, reporter, reason, status, timestamp.
-
-When implementing withdrawals, select refundable deposits FIFO by `created_at`.
-
-## Payment And Payout Notes
-
-- Use `currency="XTR"` for Telegram Stars invoices.
-- The invoice payload should identify the user and Stars amount.
-- On successful payment, read `telegram_payment_charge_id`, create the deposit,
-  and credit the user's balance in one durable flow.
-- Payout calculation should return winners' stake plus their proportional share
-  of the losing pool after platform fee.
-- The planned default platform fee example is 8%, represented as `0.08`.
-
-## Testing Priorities
-
-Start tests where product risk is highest:
-
-- Telegram Mini App `initData` validation.
-- Webhook secret validation.
-- Deposit confirmation and idempotency.
-- Balance debit/credit transaction safety.
-- Bet validation: closed market, creator self-bet, insufficient balance,
-  below minimum, invalid option.
-- Payout math, including rounding behavior.
-- FIFO charge ID selection for withdrawals.
-- Auto-cancel and refund of unresolved markets.
-- Dispute freeze and admin arbitration.
-
-Before production, run a real 1-Star payment test and verify that both
-`charge_id` capture and `refundStarPayment` work end to end.
-
-## Development Conventions
-
-- Prefer typed Python code and dataclasses or Pydantic models for structured
-  results such as `BetResult`, `ResolutionResult`, `WithdrawalResult`, and
-  stats objects.
-- Keep environment variables documented when they are introduced:
-  `BOT_TOKEN`, `DB_URL` or `DATABASE_URL`, `WEBHOOK_URL`, `WEBHOOK_SECRET`,
-  `PLATFORM_FEE_PCT`, and `ADMIN_IDS`.
-- Do not commit real tokens, database URLs, webhook secrets, or admin IDs.
-- Use structured JSON logs in production and readable logs locally.
-- Add health checks that verify app, database, and bot reachability.
-- Preserve user-facing Russian copy unless the user asks for a language change.
-
-## Open Questions For Future Work
-
-- Exact backend framework for webhook/API hosting is not fixed by existing code.
-  The plan names `web.Request`, so aiohttp-style handlers are acceptable unless
-  the project later chooses FastAPI or another framework.
-- Rounding rules for payout distribution must be finalized before money-like
-  flows are shipped.
-- Partial refund behavior for deposits may require live Telegram API validation.
-  Test this with a 1-Star transaction before relying on assumptions.
-- Anti-fraud thresholds are not specified yet; implement conservative flags
-  first and keep admin override paths clear.
+- Mini App frontend is not built yet; set `MINI_APP_URL` when it exists.
+- Rounding rules for payout distribution are not finalized.
+- Partial refund behavior for Stars deposits still needs real Telegram API
+  validation.
+- Anti-fraud thresholds are not specified yet.
