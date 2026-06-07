@@ -129,7 +129,10 @@ after every meaningful architecture, deployment, environment, or module change.
 - `bot/config.py`: `Config`, `.env`/environment loading, config validation,
   redacted config logging.
 - `bot/infrastructure.py`: `setup_webhook`, `create_db_pool`, async PostgreSQL
-  URL normalization, infrastructure errors.
+  URL normalization, infrastructure errors. Supabase pooler URLs with
+  `sslmode=require` are normalized to asyncpg-compatible `ssl=require`, and the
+  asyncpg statement cache is disabled for PgBouncer/transaction-pooler
+  compatibility.
 - `bot/models.py`: Module 3 SQLAlchemy ORM models and status enums.
 - `bot/database.py`: async session factory/context helpers, transaction
   commit/rollback logging, and metadata table creation helper for local/test

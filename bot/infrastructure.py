@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 if TYPE_CHECKING:
     from aiogram import Bot
@@ -78,6 +79,7 @@ async def create_db_pool(db_url: str, pool_size: int = 10) -> "AsyncEngine":
             pool_size=pool_size,
             max_overflow=pool_size,
             pool_pre_ping=True,
+            connect_args={"statement_cache_size": 0},
         )
     except Exception as exc:
         logger.exception("Failed to create async database engine")
@@ -89,12 +91,40 @@ async def create_db_pool(db_url: str, pool_size: int = 10) -> "AsyncEngine":
 
 def _normalize_async_postgres_url(db_url: str) -> str:
     if db_url.startswith("postgres://"):
-        return "postgresql+asyncpg://" + db_url[len("postgres://") :]
+        db_url = "postgresql+asyncpg://" + db_url[len("postgres://") :]
+        return _normalize_asyncpg_query_params(db_url)
 
     if db_url.startswith("postgresql://"):
-        return "postgresql+asyncpg://" + db_url[len("postgresql://") :]
+        db_url = "postgresql+asyncpg://" + db_url[len("postgresql://") :]
+        return _normalize_asyncpg_query_params(db_url)
 
-    return db_url
+    return _normalize_asyncpg_query_params(db_url)
+
+
+def _normalize_asyncpg_query_params(db_url: str) -> str:
+    parts = urlsplit(db_url)
+    query_items = parse_qsl(parts.query, keep_blank_values=True)
+    normalized_items: list[tuple[str, str]] = []
+    ssl_value: str | None = None
+
+    for key, value in query_items:
+        if key == "sslmode":
+            ssl_value = value
+            continue
+        normalized_items.append((key, value))
+
+    if ssl_value is not None and not any(key == "ssl" for key, _value in normalized_items):
+        normalized_items.append(("ssl", ssl_value))
+
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(normalized_items),
+            parts.fragment,
+        )
+    )
 
 
 def _redact_db_url(db_url: str) -> str:

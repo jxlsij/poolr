@@ -20,6 +20,15 @@ def test_normalize_postgres_url_for_asyncpg() -> None:
     )
 
 
+def test_normalize_postgres_url_translates_sslmode_for_asyncpg() -> None:
+    assert (
+        _normalize_async_postgres_url(
+            "postgresql://user:pass@pooler.supabase.com:6543/db?sslmode=require"
+        )
+        == "postgresql+asyncpg://user:pass@pooler.supabase.com:6543/db?ssl=require"
+    )
+
+
 def test_redact_db_url_hides_password() -> None:
     redacted = _redact_db_url("postgresql+asyncpg://user:pass@localhost/db")
 
