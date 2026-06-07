@@ -43,6 +43,43 @@ after every meaningful architecture, deployment, environment, or module change.
     recording, creator/minimum/deadline/option/balance validation,
     probability/payout estimate helpers, normal and inline market card edits,
     betting router wiring, logging, exception wrapping, and tests.
+  - Module 8: Stars resolution and payout distribution. Includes creator-only
+    `resolve:{market_id}:{option_index}` callbacks, deadline enforcement,
+    resolution keyboards/notifications, proportional winner payout calculation
+    with configurable `PLATFORM_FEE_PCT`, `Payout` row creation, withdrawable
+    Stars accrual through the existing internal balance column, market status
+    and winning option persistence, resolved/cancelled card updates, group
+    result posts, 24-hour grace auto-cancel stake refunds, operation-level
+    logging, provider/persistence/unexpected failure wrapping, and tests.
+  - Module 9: manual TON-equivalent withdrawal requests. Includes `/withdraw`
+    FSM/direct-args flow, TON wallet validation, withdrawable Stars reservation,
+    `Withdrawal` request persistence, admin notifications, admin paid/reject
+    callbacks, TON transaction hash capture, payout paid/rejected audit fields,
+    rejection refunds, user notifications, operation-level logging, exception
+    wrapping, message/callback fallback responses for provider/persistence
+    failures, migration `0003_manual_ton_withdrawals.sql`, and tests. This
+    does not use `refundStarPayment` as a normal withdrawal rail.
+  - Module 10: anti-fraud checks and dispute/arbitration foundation. Includes
+    banned-user/market-state bet gating, lightweight suspicious-pattern scoring,
+    24-hour post-resolution dispute window, `dispute:{market_id}` callbacks,
+    market freezing with `MarketStatus.DISPUTED`, admin dispute notifications,
+    admin resolve/reject callbacks, arbitration payout redistribution through
+    the Module 8 resolution service, duplicate-payout guard, `markets.resolved_at`
+    and `disputes.resolution_note` persistence, operation-level logging,
+    exception wrapping, safe callback-answer fallbacks, invalid/unauthorized
+    callback logging, all-admin-notification-failure logging, migration
+    `0004_disputes_and_resolved_at.sql`, and tests.
+  - Module 11: notifications and scheduler foundation. Includes persistent
+    `notification_logs` idempotency, an asyncio background expiry worker started
+    on aiohttp startup and cancelled on cleanup, deadline-approaching group
+    reminders, deadline-reached market card updates without persisting `CLOSED`
+    status, creator resolution prompts, 24-hour unresolved auto-cancel scanning
+    with stake refunds, best-effort direct bet confirmations, best-effort payout
+    notifications after creator/admin resolution, provider/persistence error
+    wrapping, per-market expiry-scan rollback after item failures, tolerant
+    closed-market handling when creator DMs fail but the card update succeeds,
+    optional APScheduler-compatible `schedule_market_jobs`, migration
+    `0005_notification_logs.sql`, and tests.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
     emoji-free Markdown caption and an Open button; now also silently ensures
     the Telegram user when a database session is available.
@@ -151,6 +188,25 @@ after every meaningful architecture, deployment, environment, or module change.
   direct stakes into `deposits` plus `bets`, updates market cards, and exposes
   `place_bet`, `validate_bet_request`, `calculate_implied_probability`, and
   `estimate_payout`.
+- `bot/resolution.py`: Module 8 resolution service/router. Handles creator
+  resolution callbacks, builds resolution keyboards, validates deadline and
+  creator ownership, distributes winner payouts in Stars units, records
+  `Payout` rows, accrues withdrawable Stars internally, publishes resolved
+  market cards/results, and can auto-cancel stale unresolved markets with stake
+  refunds.
+- `bot/withdrawals.py`: Module 9 manual TON-equivalent payout service/router.
+  Handles `/withdraw`, TON wallet and tx hash validation, withdrawable Stars
+  reservation, admin review callbacks, paid/rejected status transitions, TON tx
+  hash recording, rejected-request refunds, and safe user/admin notifications.
+- `bot/fraud.py`: Module 10 anti-fraud/dispute service/router. Handles
+  bet-gating checks, suspicious-pattern scoring, user dispute callbacks,
+  disputed-market freezing, admin dispute notifications, arbitration callbacks,
+  rejected disputes, and safe logging/exception normalization.
+- `bot/notifications.py`: Module 11 notification/scheduler service. Handles
+  persistent notification idempotency, background expiry scans, deadline
+  reminders, closed-market card updates, creator resolution prompts,
+  unresolved-market auto-cancel triggering, bet confirmations, and payout
+  notifications.
 - `bot/payments.py`: Module 5 direct Stars stake intake helpers and router:
   `send_deposit_invoice`, `handle_pre_checkout_query`,
   `handle_successful_payment`, `credit_credits`, `debit_credits`, and compact
@@ -177,7 +233,11 @@ after every meaningful architecture, deployment, environment, or module change.
 - `frontend/`: reserved for React/Tailwind Mini App.
 - `migrations/`: SQL migrations, currently
   `0001_module3_database_layer.sql` for the Module 3 schema and
-  `0002_inline_mode_markets.sql` for `markets.inline_message_id`.
+  `0002_inline_mode_markets.sql` for `markets.inline_message_id`, and
+  `0003_manual_ton_withdrawals.sql` for manual payout audit fields on
+  `withdrawals`, and `0004_disputes_and_resolved_at.sql` for
+  `markets.resolved_at` plus dispute resolution notes, and
+  `0005_notification_logs.sql` for persistent notification idempotency.
 - `tests/`: focused tests for config, infrastructure, security helpers, and
   Module 3 database CRUD.
 - `deploy guides/`: user-provided Hugging Face/Cloudflare deployment guide.
@@ -199,6 +259,8 @@ Optional:
 - `PLATFORM_FEE_PCT`: defaults to `0.08`. This is provisional; final fee,
   reserve, and withdrawal economics are not decided.
 - `ADMIN_IDS`: comma/space-separated Telegram user IDs.
+- `NOTIFICATION_CHECK_INTERVAL_SECONDS`: background expiry worker interval;
+  defaults to `300`.
 - `LOG_LEVEL`: defaults to `INFO`.
 - `PORT`: defaults to `7860`.
 
@@ -249,18 +311,19 @@ Never commit real secrets or real `.env` files.
 
 Continue following the dependency chain from the plan:
 
-1. Module 8: resolution, fee calculation, payout distribution, and internal
-   withdrawable balance.
-2. Module 9: Mini App withdrawal requests plus admin-reviewed manual
-   TON-equivalent payouts. Do not implement FIFO `charge_id` refunds as normal
-   withdrawals.
-3. Modules 10-14: anti-fraud, disputes, notifications, API, admin, deployment,
+1. Module 12: Mini App backend API surfaces for profile, markets, bets,
+   withdrawals, and admin-safe views.
+2. Modules 13-14: admin operations, deployment hardening,
    monitoring.
 
 Do not build later modules on temporary storage. Module 3 is the persistent data
 foundation; Module 4 is the implicit identity/session foundation; Module 5 is
 the Stars payment intake foundation; Module 6 is the group market card
-foundation; Module 7 is the direct betting/stake foundation.
+foundation; Module 7 is the direct betting/stake foundation; Module 8 is the
+Stars resolution and withdrawable balance accrual foundation; Module 9 is the
+manual TON-equivalent withdrawal request/admin review foundation; Module 10 is
+the anti-fraud/dispute/arbitration foundation; Module 11 is the persistent
+notification and expiry-worker foundation.
 
 ## Testing And Verification
 
@@ -276,6 +339,28 @@ foundation; Module 7 is the direct betting/stake foundation.
     (pytest-asyncio deprecation warnings from Python 3.14).
   - `.venv/bin/python -m pytest -q` passed with 61 tests on 2026-06-07 after
     Module 7 betting engine implementation (same pytest-asyncio warnings).
+  - `.venv/bin/python -m pytest -q` passed with 70 tests on 2026-06-07 after
+    Module 8 Stars resolution implementation (same pytest-asyncio warnings).
+  - `.venv/bin/python -m pytest -q` passed with 71 tests on 2026-06-07 after
+    hardening Module 8 logging and exception wrapping (same warnings).
+  - `.venv/bin/python -m pytest -q` passed with 80 tests on 2026-06-07 after
+    Module 9 manual TON-equivalent withdrawal implementation (same warnings).
+  - `.venv/bin/python -m pytest -q` passed with 81 tests on 2026-06-07 after
+    hardening Module 9 logging and handler exception fallbacks (same warnings).
+  - `.venv/bin/python -m compileall bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 87 tests on 2026-06-07 after
+    Module 10 anti-fraud/dispute implementation (same pytest-asyncio warnings).
+  - `.venv/bin/python -m compileall bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 89 tests on 2026-06-07 after
+    hardening Module 10 callback logging and exception fallbacks (same warnings).
+  - `.venv/bin/python -m compileall bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 95 tests on 2026-06-07 after
+    Module 11 notifications/scheduler implementation (same pytest-asyncio
+    warnings).
+  - `.venv/bin/python -m compileall bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 96 tests on 2026-06-07 after
+    hardening Module 11 logging, per-item rollback, and provider fallbacks
+    (same warnings).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:
@@ -294,6 +379,7 @@ foundation; Module 7 is the direct betting/stake foundation.
   recording.
 - Partial refund behavior for Stars payments still needs real Telegram API
   validation for disputes/support only, not as the default payout mechanism.
-- Anti-fraud thresholds are not specified yet.
+- Anti-fraud thresholds are provisional lightweight heuristics; tune with real
+  usage data before production money launch.
 - Legal/compliance posture for real-money-like prediction markets must be
   reviewed before broad public launch.

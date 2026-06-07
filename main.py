@@ -13,11 +13,15 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from bot.config import ConfigError, load_config
 from bot.database import create_engine_and_session_factory, run_sql_migrations
 from bot.betting import create_betting_router
+from bot.fraud import create_fraud_router
 from bot.handlers.markets import create_markets_router
 from bot.handlers.start import create_start_router
 from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, InfrastructureError, setup_webhook
 from bot.middleware.database import DatabaseSessionMiddleware
+from bot.notifications import start_notification_worker, stop_notification_worker
 from bot.payments import create_payments_router
+from bot.resolution import create_resolution_router
+from bot.withdrawals import create_withdrawals_router
 
 
 logger = logging.getLogger(__name__)
@@ -60,7 +64,21 @@ def create_app() -> web.Application:
     dispatcher.include_router(create_start_router(_resolve_open_url(config.WEBHOOK_URL)))
     dispatcher.include_router(create_markets_router(os.getenv("MINI_APP_URL")))
     dispatcher.include_router(create_betting_router(os.getenv("MINI_APP_URL")))
-    dispatcher.include_router(create_payments_router())
+    dispatcher.include_router(
+        create_resolution_router(
+            platform_fee_pct=config.PLATFORM_FEE_PCT,
+            mini_app_url=os.getenv("MINI_APP_URL"),
+        )
+    )
+    dispatcher.include_router(
+        create_fraud_router(
+            admin_ids=config.ADMIN_IDS,
+            platform_fee_pct=config.PLATFORM_FEE_PCT,
+            mini_app_url=os.getenv("MINI_APP_URL"),
+        )
+    )
+    dispatcher.include_router(create_withdrawals_router(config.ADMIN_IDS))
+    dispatcher.include_router(create_payments_router(platform_fee_pct=config.PLATFORM_FEE_PCT))
     webhook_path = _webhook_path_from_url(config.WEBHOOK_URL)
     logger.info("Registering webhook handler at path %s", webhook_path)
 
@@ -71,6 +89,12 @@ def create_app() -> web.Application:
         await run_sql_migrations(engine)
         dispatcher.update.middleware(DatabaseSessionMiddleware(session_factory))
         logger.info("Database session middleware registered")
+        app["notification_worker"] = start_notification_worker(
+            bot=bot,
+            session_factory=session_factory,
+            mini_app_url=os.getenv("MINI_APP_URL"),
+            interval_seconds=_notification_interval_seconds(),
+        )
         await on_startup(
             bot=bot,
             webhook_url=config.WEBHOOK_URL,
@@ -95,6 +119,8 @@ def create_app() -> web.Application:
 
 
 async def cleanup_database(app: web.Application) -> None:
+    await stop_notification_worker(app.get("notification_worker"))
+
     engine = app.get("db_engine")
     if engine is None:
         return
@@ -118,6 +144,18 @@ def _webhook_path_from_url(webhook_url: str) -> str:
 
 def _resolve_open_url(webhook_url: str) -> str:
     return os.getenv("MINI_APP_URL") or webhook_url
+
+
+def _notification_interval_seconds() -> int:
+    raw_value = os.getenv("NOTIFICATION_CHECK_INTERVAL_SECONDS", "300")
+    try:
+        interval = int(raw_value)
+    except ValueError as exc:
+        logger.exception("NOTIFICATION_CHECK_INTERVAL_SECONDS must be an integer")
+        raise RuntimeError("NOTIFICATION_CHECK_INTERVAL_SECONDS must be an integer") from exc
+    if interval < 1:
+        raise RuntimeError("NOTIFICATION_CHECK_INTERVAL_SECONDS must be at least 1")
+    return interval
 
 
 def main() -> None:

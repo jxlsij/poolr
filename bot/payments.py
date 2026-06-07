@@ -142,6 +142,7 @@ async def handle_pre_checkout_query(
 async def handle_successful_payment(
     message: Message,
     session: AsyncSession,
+    platform_fee_pct: float = 0.08,
 ) -> None:
     payment = message.successful_payment
     if payment is None:
@@ -182,7 +183,12 @@ async def handle_successful_payment(
             if validation_error is not None:
                 raise PaymentValidationError(validation_error.value)
             try:
-                await handle_successful_stake_payment(message, session, payload)
+                await handle_successful_stake_payment(
+                    message=message,
+                    session=session,
+                    payload=payload,
+                    platform_fee_pct=platform_fee_pct,
+                )
             except BettingModuleError as exc:
                 raise PaymentPersistenceError("Stake payment processing failed") from exc
             return
@@ -326,7 +332,7 @@ def parse_invoice_payload(payload: str) -> dict[str, Any]:
     raise PaymentValidationError("invoice payload type is unsupported")
 
 
-def create_payments_router() -> Router:
+def create_payments_router(platform_fee_pct: float = 0.08) -> Router:
     router = Router(name="payments")
 
     @router.pre_checkout_query()
@@ -342,7 +348,7 @@ def create_payments_router() -> Router:
         db_session: AsyncSession,
     ) -> None:
         try:
-            await handle_successful_payment(message, db_session)
+            await handle_successful_payment(message, db_session, platform_fee_pct=platform_fee_pct)
         except PaymentModuleError:
             logger.exception("Successful payment handling failed")
             await db_session.rollback()

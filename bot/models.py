@@ -150,6 +150,7 @@ class Market(Base):
         nullable=False,
         default=utc_now,
     )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     creator: Mapped[User] = relationship(
         back_populates="markets_created",
@@ -228,6 +229,10 @@ class Withdrawal(Base):
     )
     credits_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     charge_ids_used: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    ton_wallet_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ton_tx_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    admin_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    admin_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[WithdrawalStatus] = mapped_column(
         enum_column(WithdrawalStatus),
         nullable=False,
@@ -238,6 +243,7 @@ class Withdrawal(Base):
         nullable=False,
         default=utc_now,
     )
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="withdrawals")
 
@@ -258,6 +264,7 @@ class Dispute(Base):
         nullable=False,
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[DisputeStatus] = mapped_column(
         enum_column(DisputeStatus),
         nullable=False,
@@ -273,6 +280,24 @@ class Dispute(Base):
     raiser: Mapped[User] = relationship(
         back_populates="disputes_raised",
         foreign_keys=[raised_by],
+    )
+
+
+class NotificationLog(Base):
+    __tablename__ = "notification_logs"
+    __table_args__ = (
+        UniqueConstraint("kind", "market_id", "user_id", name="uq_notification_logs_kind_market_user"),
+        Index("ix_notification_logs_kind_sent", "kind", "sent_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    market_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
     )
 
 

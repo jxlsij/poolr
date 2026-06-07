@@ -266,6 +266,7 @@ async def handle_successful_stake_payment(
     message: Message,
     session: AsyncSession,
     payload: dict[str, int],
+    platform_fee_pct: float = 0.08,
 ) -> BetResult | None:
     payment = message.successful_payment
     if payment is None:
@@ -304,12 +305,11 @@ async def handle_successful_stake_payment(
             option_index=option_index,
             credits_amount=stars_amount,
         )
+        market = await _get_market_for_read(session, market_id)
         try:
             await update_market_card_for_bet(
                 bot=message.bot,
-                market=result.bet.market
-                if result.bet is not None
-                else await _get_market_for_read(session, market_id),
+                market=market,
                 pool_by_option=result.pool_by_option,
             )
         except Exception:
@@ -317,6 +317,29 @@ async def handle_successful_stake_payment(
                 "Stake was recorded but market card update failed: market_id=%d",
                 market_id,
             )
+        if result.bet is not None:
+            try:
+                from bot.notifications import notify_bet_confirmed
+
+                await notify_bet_confirmed(
+                    bot=message.bot,
+                    user_id=user_id,
+                    bet=result.bet,
+                    market=market,
+                    new_balance=result.new_balance,
+                    estimated_payout=_estimate_payout_from_recorded_pool(
+                        stars_amount,
+                        option_index,
+                        result.pool_by_option,
+                        platform_fee_pct,
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    "Stake was recorded but bet notification failed: market_id=%d user_id=%d",
+                    market_id,
+                    user_id,
+                )
     except (DatabaseLayerError, UserModuleError, SQLAlchemyError) as exc:
         logger.exception(
             "Could not process successful stake payment: user_id=%d market_id=%d charge_id=%s",
@@ -335,6 +358,17 @@ async def handle_successful_stake_payment(
             market_id,
         )
     return result
+
+
+def _estimate_payout_from_recorded_pool(
+    bet_amount: int,
+    option_index: int,
+    pool_by_option: dict[int, int],
+    platform_fee_pct: float,
+) -> int:
+    pool_before = dict(pool_by_option)
+    pool_before[option_index] = max(pool_before.get(option_index, 0) - bet_amount, 0)
+    return estimate_payout(bet_amount, option_index, pool_before, platform_fee_pct)
 
 
 async def place_bet(

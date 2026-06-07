@@ -13,9 +13,14 @@ from bot.models import (
     Bet,
     Deposit,
     DepositStatus,
+    Dispute,
+    DisputeStatus,
     Market,
     MarketStatus,
+    Payout,
     User,
+    Withdrawal,
+    WithdrawalStatus,
 )
 
 
@@ -372,6 +377,8 @@ async def update_market_status(
 
     market.status = status
     market.winning_option = winning_option
+    if status == MarketStatus.RESOLVED and market.resolved_at is None:
+        market.resolved_at = datetime.now(timezone.utc)
     await session.flush()
     logger.info(
         "Updated market status: id=%d status=%s winning_option=%s",
@@ -501,6 +508,265 @@ async def get_user_bet_on_market(
     _require_positive_int(market_id, "market_id")
     stmt = select(Bet).where(Bet.user_id == user_id, Bet.market_id == market_id)
     return await session.scalar(stmt)
+
+
+@db_operation("get_bets_for_market")
+async def get_bets_for_market(
+    session: AsyncSession,
+    market_id: int,
+    for_update: bool = False,
+) -> list[Bet]:
+    _require_positive_int(market_id, "market_id")
+
+    stmt = (
+        select(Bet)
+        .where(Bet.market_id == market_id)
+        .order_by(Bet.id.asc())
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    bets = list((await session.scalars(stmt)).all())
+    logger.debug("Loaded market bets: market_id=%d count=%d", market_id, len(bets))
+    return bets
+
+
+@db_operation("create_payout")
+async def create_payout(
+    session: AsyncSession,
+    user_id: int,
+    market_id: int,
+    credits_won: int,
+) -> Payout:
+    _require_positive_int(user_id, "user_id")
+    _require_positive_int(market_id, "market_id")
+    if not isinstance(credits_won, int) or credits_won < 0:
+        raise ValueError("credits_won must be a non-negative integer")
+
+    payout = Payout(
+        user_id=user_id,
+        market_id=market_id,
+        credits_won=credits_won,
+    )
+    session.add(payout)
+    await session.flush()
+    logger.info(
+        "Created payout: id=%d user_id=%d market_id=%d stars=%d",
+        payout.id,
+        user_id,
+        market_id,
+        credits_won,
+    )
+    return payout
+
+
+@db_operation("get_payouts_for_market")
+async def get_payouts_for_market(
+    session: AsyncSession,
+    market_id: int,
+) -> list[Payout]:
+    _require_positive_int(market_id, "market_id")
+
+    stmt = (
+        select(Payout)
+        .where(Payout.market_id == market_id)
+        .order_by(Payout.credits_won.desc(), Payout.id.asc())
+    )
+    payouts = list((await session.scalars(stmt)).all())
+    logger.debug("Loaded market payouts: market_id=%d count=%d", market_id, len(payouts))
+    return payouts
+
+
+@db_operation("create_withdrawal")
+async def create_withdrawal(
+    session: AsyncSession,
+    user_id: int,
+    credits_amount: int,
+    ton_wallet_address: str,
+    charge_ids_used: list[str] | None = None,
+) -> Withdrawal:
+    _require_positive_int(user_id, "user_id")
+    _require_positive_int(credits_amount, "credits_amount")
+    _require_text(ton_wallet_address, "ton_wallet_address")
+    if charge_ids_used is not None and not isinstance(charge_ids_used, list):
+        raise TypeError("charge_ids_used must be a list")
+
+    withdrawal = Withdrawal(
+        user_id=user_id,
+        credits_amount=credits_amount,
+        charge_ids_used=charge_ids_used or [],
+        ton_wallet_address=ton_wallet_address,
+        status=WithdrawalStatus.PENDING,
+    )
+    session.add(withdrawal)
+    await session.flush()
+    logger.info(
+        "Created withdrawal request: id=%d user_id=%d stars=%d",
+        withdrawal.id,
+        user_id,
+        credits_amount,
+    )
+    return withdrawal
+
+
+@db_operation("get_withdrawal")
+async def get_withdrawal(
+    session: AsyncSession,
+    withdrawal_id: int,
+    for_update: bool = False,
+) -> Withdrawal | None:
+    _require_positive_int(withdrawal_id, "withdrawal_id")
+    stmt = select(Withdrawal).where(Withdrawal.id == withdrawal_id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    return await session.scalar(stmt)
+
+
+@db_operation("get_pending_withdrawals")
+async def get_pending_withdrawals(session: AsyncSession) -> list[Withdrawal]:
+    stmt = (
+        select(Withdrawal)
+        .where(Withdrawal.status == WithdrawalStatus.PENDING)
+        .order_by(Withdrawal.created_at.asc(), Withdrawal.id.asc())
+    )
+    withdrawals = list((await session.scalars(stmt)).all())
+    logger.debug("Loaded pending withdrawals: count=%d", len(withdrawals))
+    return withdrawals
+
+
+@db_operation("mark_withdrawal_paid")
+async def mark_withdrawal_paid(
+    session: AsyncSession,
+    withdrawal_id: int,
+    admin_id: int,
+    ton_tx_hash: str,
+    admin_note: str | None = None,
+) -> Withdrawal:
+    _require_positive_int(withdrawal_id, "withdrawal_id")
+    _require_positive_int(admin_id, "admin_id")
+    _require_text(ton_tx_hash, "ton_tx_hash")
+
+    withdrawal = await get_withdrawal(session, withdrawal_id, for_update=True)
+    if withdrawal is None:
+        raise RecordNotFoundError(f"Withdrawal {withdrawal_id} was not found")
+    if withdrawal.status != WithdrawalStatus.PENDING:
+        raise ValueError("withdrawal is not pending")
+
+    withdrawal.status = WithdrawalStatus.COMPLETED
+    withdrawal.admin_id = admin_id
+    withdrawal.ton_tx_hash = ton_tx_hash
+    withdrawal.admin_note = admin_note
+    withdrawal.updated_at = datetime.now(timezone.utc)
+    await session.flush()
+    logger.info(
+        "Marked withdrawal paid: id=%d user_id=%d admin_id=%d",
+        withdrawal.id,
+        withdrawal.user_id,
+        admin_id,
+    )
+    return withdrawal
+
+
+@db_operation("mark_withdrawal_failed")
+async def mark_withdrawal_failed(
+    session: AsyncSession,
+    withdrawal_id: int,
+    admin_id: int,
+    admin_note: str | None = None,
+) -> Withdrawal:
+    _require_positive_int(withdrawal_id, "withdrawal_id")
+    _require_positive_int(admin_id, "admin_id")
+
+    withdrawal = await get_withdrawal(session, withdrawal_id, for_update=True)
+    if withdrawal is None:
+        raise RecordNotFoundError(f"Withdrawal {withdrawal_id} was not found")
+    if withdrawal.status != WithdrawalStatus.PENDING:
+        raise ValueError("withdrawal is not pending")
+
+    withdrawal.status = WithdrawalStatus.FAILED
+    withdrawal.admin_id = admin_id
+    withdrawal.admin_note = admin_note
+    withdrawal.updated_at = datetime.now(timezone.utc)
+    await session.flush()
+    logger.info(
+        "Marked withdrawal failed: id=%d user_id=%d admin_id=%d",
+        withdrawal.id,
+        withdrawal.user_id,
+        admin_id,
+    )
+    return withdrawal
+
+
+@db_operation("create_dispute")
+async def create_dispute(
+    session: AsyncSession,
+    market_id: int,
+    raised_by: int,
+    reason: str,
+) -> Dispute:
+    _require_positive_int(market_id, "market_id")
+    _require_positive_int(raised_by, "raised_by")
+    _require_text(reason, "reason")
+
+    dispute = Dispute(
+        market_id=market_id,
+        raised_by=raised_by,
+        reason=reason,
+        status=DisputeStatus.OPEN,
+    )
+    session.add(dispute)
+    await session.flush()
+    logger.info(
+        "Created dispute: id=%d market_id=%d raised_by=%d",
+        dispute.id,
+        market_id,
+        raised_by,
+    )
+    return dispute
+
+
+@db_operation("get_open_dispute_for_market")
+async def get_open_dispute_for_market(
+    session: AsyncSession,
+    market_id: int,
+    for_update: bool = False,
+) -> Dispute | None:
+    _require_positive_int(market_id, "market_id")
+    stmt = (
+        select(Dispute)
+        .where(Dispute.market_id == market_id, Dispute.status == DisputeStatus.OPEN)
+        .order_by(Dispute.created_at.asc(), Dispute.id.asc())
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    return await session.scalar(stmt)
+
+
+@db_operation("update_dispute_status")
+async def update_dispute_status(
+    session: AsyncSession,
+    dispute_id: int,
+    status: DisputeStatus,
+    resolution_note: str | None = None,
+) -> Dispute:
+    _require_positive_int(dispute_id, "dispute_id")
+    if not isinstance(status, DisputeStatus):
+        status = DisputeStatus(status)
+
+    stmt = select(Dispute).where(Dispute.id == dispute_id).with_for_update()
+    dispute = await session.scalar(stmt)
+    if dispute is None:
+        raise RecordNotFoundError(f"Dispute {dispute_id} was not found")
+
+    dispute.status = status
+    dispute.resolution_note = resolution_note
+    await session.flush()
+    logger.info(
+        "Updated dispute status: id=%d market_id=%d status=%s",
+        dispute.id,
+        dispute.market_id,
+        status.value,
+    )
+    return dispute
 
 
 def _require_int(value: int, name: str) -> None:
