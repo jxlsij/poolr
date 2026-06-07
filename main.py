@@ -11,6 +11,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from bot.config import ConfigError, load_config
+from bot.handlers.start import create_start_router
 from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, InfrastructureError, setup_webhook
 
 
@@ -51,6 +52,7 @@ def create_app() -> web.Application:
     config = load_config()
     bot = create_bot(config.BOT_TOKEN)
     dispatcher = Dispatcher()
+    dispatcher.include_router(create_start_router(_resolve_open_url(config.WEBHOOK_URL)))
     webhook_path = _webhook_path_from_url(config.WEBHOOK_URL)
     logger.info("Registering webhook handler at path %s", webhook_path)
 
@@ -88,6 +90,10 @@ def _normalize_aiogram_api_base(telegram_api_url: str) -> str:
 def _webhook_path_from_url(webhook_url: str) -> str:
     path = urlparse(webhook_url).path
     return path or "/"
+
+
+def _resolve_open_url(webhook_url: str) -> str:
+    return os.getenv("MINI_APP_URL") or webhook_url
 
 
 def main() -> None:

@@ -40,3 +40,6 @@ This project uses Docker mode and exposes port `7860`. The current `main.py`
 starts a health endpoint, registers the Telegram webhook, and mounts an aiogram
 webhook handler when environment variables are present. Full bot routes will be
 implemented in later modules.
+
+Set `MINI_APP_URL` to control where the `/start` message's Open button points.
+If it is not set, the button falls back to `WEBHOOK_URL`.
