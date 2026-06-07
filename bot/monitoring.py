@@ -70,17 +70,29 @@ def setup_logging(
 
 
 async def health_check(request: web.Request) -> web.Response:
-    db_status = await _check_database(request)
-    bot_status = "running" if request.app.get(BOT_APP_KEY) is not None else "unconfigured"
-    status = "ok" if db_status == "connected" and bot_status == "running" else "degraded"
-    payload = {
-        "status": status,
-        "db": db_status,
-        "bot": bot_status,
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }
-    logger.info("Health check: status=%s db=%s bot=%s", status, db_status, bot_status)
-    return web.json_response(payload, status=200 if status == "ok" else 503)
+    try:
+        db_status = await _check_database(request)
+        bot_status = "running" if _app_get(request.app, BOT_APP_KEY, "bot") is not None else "unconfigured"
+        status = "ok" if db_status == "connected" and bot_status == "running" else "degraded"
+        payload = {
+            "status": status,
+            "db": db_status,
+            "bot": bot_status,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        logger.info("Health check: status=%s db=%s bot=%s", status, db_status, bot_status)
+        return web.json_response(payload, status=200 if status == "ok" else 503)
+    except Exception:
+        logger.exception("Health check failed unexpectedly")
+        return web.json_response(
+            {
+                "status": "degraded",
+                "db": "unknown",
+                "bot": "unknown",
+                "ts": datetime.now(timezone.utc).isoformat(),
+            },
+            status=503,
+        )
 
 
 async def monitor_payment_anomalies(session: AsyncSession) -> list[AnomalyReport]:
@@ -92,7 +104,7 @@ async def monitor_payment_anomalies(session: AsyncSession) -> list[AnomalyReport
 
 
 async def _check_database(request: web.Request) -> str:
-    session_factory = request.app.get(DB_SESSION_FACTORY_APP_KEY)
+    session_factory = _app_get(request.app, DB_SESSION_FACTORY_APP_KEY, "db_session_factory")
     if session_factory is None:
         return "unconfigured"
 
@@ -103,6 +115,13 @@ async def _check_database(request: web.Request) -> str:
     except Exception:
         logger.exception("Health check database probe failed")
         return "error"
+
+
+def _app_get(app: web.Application, typed_key: web.AppKey[Any], string_key: str) -> Any:
+    value = app.get(typed_key)
+    if value is not None:
+        return value
+    return app.get(string_key)
 
 
 async def _users_with_high_withdrawal_pressure(session: AsyncSession) -> list[AnomalyReport]:
