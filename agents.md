@@ -15,7 +15,7 @@ after every meaningful architecture, deployment, environment, or module change.
   - Module 2: webhook secret validation, Telegram Mini App `initData`
     validation, admin check, admin middleware, logging, exception handling.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
-    Markdown caption and an Open button.
+    emoji-free Markdown caption and an Open button.
 
 ## Important Repos And Deploys
 

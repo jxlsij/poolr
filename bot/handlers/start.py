@@ -10,19 +10,15 @@ from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarku
 
 logger = logging.getLogger(__name__)
 
-START_MESSAGE_TEXT = """👋 *Привет! Я Poolr.*
+START_MESSAGE_TEXT = """*Привет! Я Poolr.* Создавай prediction markets прямо внутри Telegram чатов.
 
-Я превращаю Telegram чаты в prediction markets.
-
-*Создать рынок:*
-
+*Как создать рынок:*
 `@pooolr_bot Will Max be late?`
-
 или просто нажми *Open* ниже.
 
-⭐ Создавай рынки
-📈 Делай предсказания
-🏆 Узнавай, кто оказался прав"""
+— Создавай пулы
+— Делай предсказания
+— Проверяй, кто был прав"""
 
 START_IMAGE_PATH = Path(__file__).resolve().parents[1] / "assets" / "start_message.png"
 
@@ -56,4 +52,3 @@ def create_start_router(open_url: str) -> Router:
         )
 
     return router
-
