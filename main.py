@@ -11,8 +11,12 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from bot.config import ConfigError, load_config
+from bot.database import create_engine_and_session_factory
+from bot.handlers.markets import create_markets_router
 from bot.handlers.start import create_start_router
 from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, InfrastructureError, setup_webhook
+from bot.middleware.database import DatabaseSessionMiddleware
+from bot.payments import create_payments_router
 
 
 logger = logging.getLogger(__name__)
@@ -53,10 +57,17 @@ def create_app() -> web.Application:
     bot = create_bot(config.BOT_TOKEN)
     dispatcher = Dispatcher()
     dispatcher.include_router(create_start_router(_resolve_open_url(config.WEBHOOK_URL)))
+    dispatcher.include_router(create_markets_router(os.getenv("MINI_APP_URL")))
+    dispatcher.include_router(create_payments_router())
     webhook_path = _webhook_path_from_url(config.WEBHOOK_URL)
     logger.info("Registering webhook handler at path %s", webhook_path)
 
     async def startup_handler(bot: Bot) -> None:
+        engine, session_factory = await create_engine_and_session_factory(config.DB_URL)
+        app["db_engine"] = engine
+        app["db_session_factory"] = session_factory
+        dispatcher.update.middleware(DatabaseSessionMiddleware(session_factory))
+        logger.info("Database session middleware registered")
         await on_startup(
             bot=bot,
             webhook_url=config.WEBHOOK_URL,
@@ -67,6 +78,7 @@ def create_app() -> web.Application:
 
     app = web.Application()
     app.router.add_get("/", health_check)
+    app.on_cleanup.append(cleanup_database)
 
     webhook_handler = SimpleRequestHandler(
         dispatcher=dispatcher,
@@ -77,6 +89,15 @@ def create_app() -> web.Application:
     setup_application(app, dispatcher, bot=bot)
 
     return app
+
+
+async def cleanup_database(app: web.Application) -> None:
+    engine = app.get("db_engine")
+    if engine is None:
+        return
+
+    await engine.dispose()
+    logger.info("Database engine disposed")
 
 
 def _normalize_aiogram_api_base(telegram_api_url: str) -> str:

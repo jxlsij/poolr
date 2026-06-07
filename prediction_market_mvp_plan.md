@@ -1,8 +1,32 @@
 # 🎯 Prediction Market Bot — Пошаговый план MVP
 
 > **Стек:** Python 3.11+ · aiogram 3.x · React + Tailwind · PostgreSQL (Supabase) · Railway · Vercel  
-> **Срок:** 3 недели · **Валюта:** Telegram Stars → внутренние кредиты (1:1)  
-> **Критически важно:** бот не может отправлять Stars напрямую — только `refundStarPayment` по `charge_id`
+> **Срок:** 3 недели · **Валюта:** Telegram Stars-first, внутренний ledger в Stars, beta-вывод эквивалента в TON вручную
+> **Критически важно:** бот не может отправлять Stars напрямую; `refundStarPayment` использовать для support/disputes, а не как обычный withdrawal
+
+---
+
+## Product Direction Update — 2026-06-07
+
+Этот план остается базой по модулям, но старую модель "пользователь покупает
+внутренние кредиты, потом выводит через refund" больше не считать целевой.
+Актуальное направление:
+
+- zero-registration UX: пользователь может создать рынок или поставить в группе
+  без обязательного `/start` и без `/register`;
+- Module 4 трактовать как User Identity: `ensure_user`, implicit upsert,
+  профиль/кошелек/история в Mini App, bot-side `/me` не обязателен;
+- Module 5 трактовать как direct Stars stake intake: invoice на конкретную
+  ставку, без user-facing "Poolr credits";
+- Module 8 начисляет выигрыш во внутренний withdrawable balance,
+  номинированный в Stars;
+- Module 9 трактовать как Mini App withdrawal request + admin-reviewed manual
+  TON-equivalent payout с записью transaction hash;
+- экономику, fee model, reserve, minimum withdrawal, payout batching, TON
+  conversion/spread и fraud/dispute reserve нужно просчитать до production
+  money launch.
+
+Подробный source of truth для будущих агентов: `agents.md`.
 
 ---
 

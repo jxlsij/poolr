@@ -17,6 +17,8 @@ class InfrastructureError(RuntimeError):
 
 DEFAULT_ALLOWED_UPDATES = [
     "message",
+    "inline_query",
+    "chosen_inline_result",
     "callback_query",
     "pre_checkout_query",
 ]

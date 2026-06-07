@@ -1,0 +1,1 @@
+"""Reusable aiogram middleware."""

@@ -8,14 +8,98 @@ after every meaningful architecture, deployment, environment, or module change.
 - Product: Telegram bot plus Mini App for group prediction markets.
 - Stack: Python 3.11+, aiogram 3.x, aiohttp, SQLAlchemy async, asyncpg,
   PostgreSQL/Supabase, Hugging Face Spaces Docker, Cloudflare Worker proxy.
-- Source plan: `prediction_market_mvp_plan.md`.
+- Source plan: `prediction_market_mvp_plan.md`. Treat it as the historical
+  baseline; the product/payment direction in this `agents.md` supersedes older
+  "credits deposit then withdraw" wording in the plan.
 - Implemented modules:
   - Module 1: infrastructure, config, webhook setup, DB engine factory,
     Docker/Hugging Face scaffolding, logging, exception handling.
   - Module 2: webhook secret validation, Telegram Mini App `initData`
     validation, admin check, admin middleware, logging, exception handling.
+  - Module 3: SQLAlchemy ORM models, session helpers, PostgreSQL SQL migration,
+    CRUD helpers for users/deposits/markets/bets, and database-layer logging
+    plus exception normalization.
+  - Module 4: implicit user identity foundation with `ensure_user`,
+    Mini App initData identity helper, aiogram DB session middleware, app-level
+    DB wiring, `/start` silent user upsert, domain exceptions, persistence error
+    wrapping, and safe operational logging.
+  - Module 5: direct Stars stake intake foundation with compact invoice payloads,
+    native `currency="XTR"` invoice sending, pre-checkout validation, successful
+    payment handling, idempotent `charge_id` persistence, internal Stars balance
+    credit/debit helpers, payments router, provider/API error wrapping, safe
+    fallback notifications, logging, and tests.
+  - Module 6: group market creation flow with `/bet`, normal mention shortcut
+    for chats where the bot is present, and Telegram Inline Mode support for
+    `@pooolr_bot question` in chats where the bot is not present. Includes
+    aiogram FSM states, question/options/deadline/min-stake validation, market
+    row creation,
+    market card publishing/updating helpers, `message_id` persistence, inline
+    result/card generation, `inline_message_id` persistence, bet buttons for
+    Module 7, logging, exception wrapping, and tests.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
-    emoji-free Markdown caption and an Open button.
+    emoji-free Markdown caption and an Open button; now also silently ensures
+    the Telegram user when a database session is available.
+
+## Product Direction
+
+- The product should feel zero-registration. Users should be able to mention
+  the bot in a group, create a market, and let others participate without first
+  visiting the bot or creating an account.
+- User rows are still required technically. Create or update them implicitly via
+  `ensure_user` on every meaningful interaction: `/start`, Mini App open,
+  group market creation, callback button click, payment, bet, payout request, or
+  admin action.
+- Do not add a required `/register` flow.
+- Do not require `/start` before a user can create a market or place a bet.
+- Keep personal profile, wallet, history, withdrawal requests, and stats in the
+  Mini App. A bot-side `/me` command is optional and currently not part of the
+  preferred MVP.
+- The group bot should focus on the shared market surface: create market,
+  publish market cards, accept Yes/No actions, update odds/pool state, and show
+  resolution.
+
+## Payment And Payout Direction
+
+- The preferred UX is Stars-first and direct-stake: users should not see
+  "Poolr credits" as the primary purchase. A group user should be able to press
+  a market button, choose an amount, pay a native Telegram Stars invoice, and be
+  in the market.
+- Internally, keep a ledger denominated in Stars. The ledger can track stakes,
+  fees, winnings, reserves, refunds, and manual payout state, but the user-facing
+  copy should say Stars rather than credits unless a legal/compliance reason
+  requires different wording.
+- Telegram Bot API can accept Stars and refund a specific prior Stars payment,
+  but it does not provide a clean bot-to-user "send Stars" payout. Do not design
+  withdrawal around arbitrary direct Star transfers.
+- Refunds are for support, disputes, failed delivery, or chargeback handling.
+  Do not treat `refundStarPayment` as the main withdrawal rail unless a later
+  real Telegram API test proves a safe, compliant pattern.
+- MVP payout preference: Stars-in, manual TON-equivalent payouts in beta.
+  Winners accrue a withdrawable balance in Stars units, then request payout in
+  the Mini App by providing or connecting a TON wallet. Admins review, pay
+  manually, record the TON transaction hash, and mark the request paid.
+- Communicate manual payouts transparently during beta. Do not imply instant
+  Telegram Stars cashout.
+- Add `/paysupport` and clear Terms before going live with real payments.
+- Consider a future TON-only or TON-advanced mode for higher-friction serious
+  markets, but do not make TON wallet connection the default casual group flow
+  unless the product direction changes again.
+
+## Economy Direction
+
+- The economics are unresolved and must be modeled before production money
+  launch. The app needs a sustainable fee, reserve, and payout policy that keeps
+  Poolr profitable while remaining understandable to users.
+- Likely revenue levers: platform fee on losing pool or gross winnings,
+  withdrawal fee/spread, minimum withdrawal, payout batching, promotional free
+  markets, and creator/group revenue share.
+- Required modeling inputs: Telegram Stars purchase/withdrawal economics,
+  TON conversion assumptions, expected average stake, market fill rate, payout
+  frequency, fraud/refund rate, chargeback/dispute reserve, infrastructure cost,
+  and support/admin time.
+- Do not hard-code final fee math yet beyond the current configurable
+  `PLATFORM_FEE_PCT`. Future work should include an explicit economic simulator
+  or spreadsheet before broad launch.
 
 ## Important Repos And Deploys
 
@@ -24,6 +108,12 @@ after every meaningful architecture, deployment, environment, or module change.
 - Public Space URL: `https://amiasayedau-poolr.hf.space`
 - Cloudflare Worker is used as Telegram API proxy because the Hugging Face free
   runtime can block direct outbound calls to `api.telegram.org`.
+- Telegram Inline Mode must be enabled manually in BotFather with `/setinline`
+  before `@pooolr_bot question` works in chats where the bot is not present.
+  Suggested placeholder: `Ask a prediction question`.
+- Optional but recommended: enable `/setinlinefeedback` in BotFather so Telegram
+  sends `chosen_inline_result` updates; the code stores `inline_message_id` when
+  those updates arrive.
 
 ## Project Layout
 
@@ -33,13 +123,45 @@ after every meaningful architecture, deployment, environment, or module change.
   redacted config logging.
 - `bot/infrastructure.py`: `setup_webhook`, `create_db_pool`, async PostgreSQL
   URL normalization, infrastructure errors.
+- `bot/models.py`: Module 3 SQLAlchemy ORM models and status enums.
+- `bot/database.py`: async session factory/context helpers, transaction
+  commit/rollback logging, and metadata table creation helper for local/test
+  setup.
+- `bot/crud.py`: Module 3 CRUD functions from the MVP plan, with domain
+  exceptions and SQLAlchemy error wrapping.
+- `bot/users.py`: Module 4 implicit Telegram user identity helpers, including
+  `ensure_user`, `ensure_user_from_webapp_data`, validation errors, persistence
+  error wrapping, and safe logs that do not include raw Mini App initData.
+- `bot/middleware/database.py`: aiogram middleware that injects `db_session`
+  into update handlers, logs update-session lifecycle, and commits/rolls back
+  via `session_scope`.
+- `bot/payments.py`: Module 5 direct Stars stake intake helpers and router:
+  `send_deposit_invoice`, `handle_pre_checkout_query`,
+  `handle_successful_payment`, `credit_credits`, `debit_credits`, and compact
+  payment payload parsing/building. It wraps Telegram provider/API failures,
+  validates pre-checkout quickly, keeps payment persistence separate from
+  best-effort user notifications, and avoids logging raw payload secrets.
+  Function names still match the old plan, but user-facing behavior should
+  remain Stars-first, not credits-first.
+- `bot/handlers/markets.py`: Module 6 market creation FSM and market card
+  helpers. `/bet` starts creation; inline question syntax `/bet Will Max be
+  late?` skips directly to options. Mention syntax like `@pooolr_bot Will Max
+  be late?` also starts creation when Telegram routes the mention to the bot.
+  Telegram Inline Mode is implemented through `inline_query` and
+  `chosen_inline_result`: `@pooolr_bot Will Max be late?` returns an
+  `InlineQueryResultArticle` with a market card, default Yes/No options, 2-hour
+  deadline, 1 Star min stake, and callback data
+  `bet:{market_id}:{option_index}` for Module 7.
 - `bot/security.py`: Module 2 security functions and `AdminMiddleware`.
 - `bot/handlers/start.py`: `/start` handler and Open button composition.
 - `bot/assets/start_message.png`: image sent by `/start`.
 - `api/`: reserved for Mini App backend endpoints.
 - `frontend/`: reserved for React/Tailwind Mini App.
-- `migrations/`: reserved for Alembic migrations.
-- `tests/`: focused tests for config, infrastructure, and security helpers.
+- `migrations/`: SQL migrations, currently
+  `0001_module3_database_layer.sql` for the Module 3 schema and
+  `0002_inline_mode_markets.sql` for `markets.inline_message_id`.
+- `tests/`: focused tests for config, infrastructure, security helpers, and
+  Module 3 database CRUD.
 - `deploy guides/`: user-provided Hugging Face/Cloudflare deployment guide.
 
 ## Environment Variables
@@ -56,7 +178,8 @@ Required in production:
 Optional:
 
 - `MINI_APP_URL`: Open button URL for `/start`. Falls back to `WEBHOOK_URL`.
-- `PLATFORM_FEE_PCT`: defaults to `0.08`.
+- `PLATFORM_FEE_PCT`: defaults to `0.08`. This is provisional; final fee,
+  reserve, and withdrawal economics are not decided.
 - `ADMIN_IDS`: comma/space-separated Telegram user IDs.
 - `LOG_LEVEL`: defaults to `INFO`.
 - `PORT`: defaults to `7860`.
@@ -65,13 +188,19 @@ Never commit real secrets or real `.env` files.
 
 ## Telegram Stars Rules
 
-- The bot cannot send Stars directly. Withdrawals must use
-  `refundStarPayment` against original Telegram payment `charge_id` values.
-- Store every deposit `charge_id` permanently.
 - Use `currency="XTR"` for Stars invoices.
+- Prefer invoice-per-stake over pre-funded credit deposits for the casual group
+  flow.
 - `answerPreCheckoutQuery` must happen within 10 seconds.
-- On `successful_payment`, save `telegram_payment_charge_id` before crediting
-  user balance.
+- On `successful_payment`, save `telegram_payment_charge_id` before recording
+  the stake or crediting any internal balance.
+- Store every incoming Stars payment `charge_id` permanently for support,
+  dispute, reconciliation, and refund handling.
+- The bot cannot send arbitrary Stars directly to users through the standard Bot
+  API. Manual TON-equivalent payouts are the current beta payout direction.
+- If a later Telegram API change enables direct bot-to-user Stars payouts, update
+  this guide, the data model, the payout module, Terms, and tests before using
+  it.
 
 ## Security Rules
 
@@ -102,26 +231,34 @@ Never commit real secrets or real `.env` files.
 
 Continue following the dependency chain from the plan:
 
-1. Module 3: database schema, ORM models, migrations, CRUD layer.
-2. Module 4: user commands/profile flow, building on current `/start`.
-3. Module 5: Stars payment intake and credit accounting.
-4. Module 6: market creation flow and market card publishing.
-5. Module 7: betting engine and market card updates.
-6. Module 8: resolution and payout distribution.
-7. Module 9: withdrawals via FIFO `charge_id` refunds.
-8. Modules 10-14: anti-fraud, disputes, notifications, API, admin, deployment,
+1. Module 7: betting engine and market card updates. Wire market-specific bet
+   buttons to Module 5 invoice payloads/handlers when market IDs and option IDs
+   exist.
+2. Module 8: resolution, fee calculation, payout distribution, and internal
+   withdrawable balance.
+3. Module 9: Mini App withdrawal requests plus admin-reviewed manual
+   TON-equivalent payouts. Do not implement FIFO `charge_id` refunds as normal
+   withdrawals.
+4. Modules 10-14: anti-fraud, disputes, notifications, API, admin, deployment,
    monitoring.
 
-Do not build later modules on temporary storage. Module 3 is the next major
+Do not build later modules on temporary storage. Module 3 is the persistent data
+foundation; Module 4 is the implicit identity/session foundation; Module 5 is
+the Stars payment intake foundation; Module 6 is the group market card
 foundation.
 
 ## Testing And Verification
 
 - Current local Python does not have `pytest` installed; `python3 -m pytest -q`
   fails with `No module named pytest`.
+- Module 3 test dependencies require `pytest-asyncio` and `aiosqlite` from
+  `requirements-dev.txt`.
 - Manual checks used so far:
   - `python3 -m compileall bot tests main.py`
   - targeted smoke scripts for config, infrastructure, security, and `/start`.
+  - `.venv/bin/python -m compileall bot tests main.py`
+  - `.venv/bin/python -m pytest -q` passed with 53 tests on 2026-06-07
+    (pytest-asyncio deprecation warnings from Python 3.14).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:
@@ -133,7 +270,13 @@ foundation.
 ## Open Questions
 
 - Mini App frontend is not built yet; set `MINI_APP_URL` when it exists.
+- The exact fee model, reserve policy, withdrawal minimum, payout batching
+  cadence, and TON conversion/spread rules are not finalized.
 - Rounding rules for payout distribution are not finalized.
-- Partial refund behavior for Stars deposits still needs real Telegram API
-  validation.
+- Manual payout operations need an admin queue, audit trail, and transaction hash
+  recording.
+- Partial refund behavior for Stars payments still needs real Telegram API
+  validation for disputes/support only, not as the default payout mechanism.
 - Anti-fraud thresholds are not specified yet.
+- Legal/compliance posture for real-money-like prediction markets must be
+  reviewed before broad public launch.

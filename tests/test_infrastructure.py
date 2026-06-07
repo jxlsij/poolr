@@ -1,4 +1,8 @@
-from bot.infrastructure import _normalize_async_postgres_url, _redact_db_url
+from bot.infrastructure import (
+    DEFAULT_ALLOWED_UPDATES,
+    _normalize_async_postgres_url,
+    _redact_db_url,
+)
 
 
 def test_normalize_postgres_url_for_asyncpg() -> None:
@@ -21,3 +25,8 @@ def test_redact_db_url_hides_password() -> None:
 
     assert redacted == "postgresql+asyncpg://user:***@localhost/db"
     assert "pass" not in redacted
+
+
+def test_default_allowed_updates_include_inline_mode() -> None:
+    assert "inline_query" in DEFAULT_ALLOWED_UPDATES
+    assert "chosen_inline_result" in DEFAULT_ALLOWED_UPDATES

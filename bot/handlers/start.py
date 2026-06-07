@@ -6,6 +6,9 @@ from pathlib import Path
 from aiogram import Router
 from aiogram.filters import CommandStart
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.users import UserModuleError, ensure_user
 
 
 logger = logging.getLogger(__name__)
@@ -27,8 +30,24 @@ def create_start_router(open_url: str) -> Router:
     router = Router(name="start")
 
     @router.message(CommandStart())
-    async def handle_start(message: Message) -> None:
+    async def handle_start(
+        message: Message,
+        db_session: AsyncSession | None = None,
+    ) -> None:
         logger.info("Handling /start: user_id=%s", message.from_user.id if message.from_user else None)
+        if db_session is not None and message.from_user is not None:
+            try:
+                user, is_new = await ensure_user(db_session, message.from_user)
+                logger.info(
+                    "Ensured /start user: telegram_id=%d is_new=%s",
+                    user.telegram_id,
+                    is_new,
+                )
+            except UserModuleError:
+                logger.warning("Could not ensure /start user identity", exc_info=True)
+        elif db_session is None:
+            logger.warning("Skipping /start user identity because db_session is missing")
+
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Open", url=open_url)],
