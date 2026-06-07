@@ -5,7 +5,7 @@ from pathlib import Path
 
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import FSInputFile, KeyboardButton, Message, ReplyKeyboardMarkup, WebAppInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.users import UserModuleError, ensure_user
@@ -48,10 +48,11 @@ def create_start_router(open_url: str) -> Router:
         elif db_session is None:
             logger.warning("Skipping /start user identity because db_session is missing")
 
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Open", url=open_url)],
-            ]
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Open", web_app=WebAppInfo(url=open_url))],
+            ],
+            resize_keyboard=True,
         )
 
         if START_IMAGE_PATH.exists():

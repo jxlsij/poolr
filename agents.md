@@ -81,8 +81,9 @@ after every meaningful architecture, deployment, environment, or module change.
     optional APScheduler-compatible `schedule_market_jobs`, migration
     `0005_notification_logs.sql`, and tests.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
-    emoji-free Markdown caption and an Open button; now also silently ensures
-    the Telegram user when a database session is available.
+    emoji-free Markdown caption and a persistent bottom Web App Open button;
+    now also silently ensures the Telegram user when a database session is
+    available.
 
 ## Product Direction
 
@@ -227,7 +228,8 @@ after every meaningful architecture, deployment, environment, or module change.
   deadline, 1 Star min stake, and callback data
   `bet:{market_id}:{option_index}` for Module 7.
 - `bot/security.py`: Module 2 security functions and `AdminMiddleware`.
-- `bot/handlers/start.py`: `/start` handler and Open button composition.
+- `bot/handlers/start.py`: `/start` handler and bottom Web App Open button
+  composition.
 - `bot/assets/start_message.png`: image sent by `/start`.
 - `api/`: reserved for Mini App backend endpoints.
 - `frontend/`: reserved for React/Tailwind Mini App.
