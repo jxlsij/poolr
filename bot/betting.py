@@ -674,6 +674,8 @@ def _validation_message(error: BetValidationError, market: Market | None = None)
 
 
 def _is_past_deadline(deadline: datetime) -> bool:
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
     return deadline <= datetime.now(timezone.utc)
 
 

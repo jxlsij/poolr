@@ -80,6 +80,15 @@ after every meaningful architecture, deployment, environment, or module change.
     closed-market handling when creator DMs fail but the card update succeeds,
     optional APScheduler-compatible `schedule_market_jobs`, migration
     `0005_notification_logs.sql`, and tests.
+  - Module 12: Mini App backend API foundation. Includes aiohttp `/api/*`
+    routes with Telegram Mini App `initData` auth, implicit Mini App user
+    ensure, session-scoped transactions, profile/stats endpoint, market detail
+    and chat active-market list endpoints, personal bets and withdrawals
+    endpoints, admin-safe overview endpoint, direct Stars invoice initiation
+    for market stakes and deposits, manual TON-equivalent withdrawal request
+    creation, JSON serializers, structured API errors, request-duration and
+    operation-level logging, explicit validation/persistence/provider exception
+    normalization, provider-failure fallbacks, and tests.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
     emoji-free Markdown caption, removes any stale reply keyboard from older
     versions, and no longer adds a per-message button; startup configures the
@@ -163,9 +172,17 @@ after every meaningful architecture, deployment, environment, or module change.
 
 ## Project Layout
 
-- `main.py`: aiohttp app entrypoint, health-check, aiogram webhook mounting,
-  webhook registration, native Telegram Bot Menu Web App button setup, custom
-  Telegram API endpoint support.
+- `main.py`: aiohttp app entrypoint, health-check, Mini App API mounting,
+  aiogram webhook mounting, webhook registration, native Telegram Bot Menu Web
+  App button setup, custom Telegram API endpoint support.
+- `api/webapp.py`: Module 12 Mini App backend API. Registers `/api/profile`,
+  `/api/market/{market_id}`, `/api/chat/{chat_id}/markets`, `/api/bets`,
+  `/api/withdrawals`, `/api/admin/overview`, `/api/bet`, `/api/deposit`, and
+  `/api/withdraw`; validates Mini App `initData`, ensures users implicitly,
+  serializes markets/bets/withdrawals, sends Stars invoices, and creates manual
+  TON-equivalent payout requests. It logs request durations and operation
+  lifecycle, returns stable JSON error codes, and separates validation,
+  persistence, and Telegram provider failures.
 - `bot/config.py`: `Config`, `.env`/environment loading, config validation,
   redacted config logging.
 - `bot/infrastructure.py`: `setup_webhook`, `create_db_pool`, async PostgreSQL
@@ -233,7 +250,7 @@ after every meaningful architecture, deployment, environment, or module change.
 - `bot/handlers/start.py`: `/start` handler and start-message composition; the
   Open button is configured globally in `main.py` through Telegram Bot Menu.
 - `bot/assets/start_message.png`: image sent by `/start`.
-- `api/`: reserved for Mini App backend endpoints.
+- `api/`: Mini App backend endpoints.
 - `frontend/`: reserved for React/Tailwind Mini App.
 - `migrations/`: SQL migrations, currently
   `0001_module3_database_layer.sql` for the Module 3 schema and
@@ -315,9 +332,8 @@ Never commit real secrets or real `.env` files.
 
 Continue following the dependency chain from the plan:
 
-1. Module 12: Mini App backend API surfaces for profile, markets, bets,
-   withdrawals, and admin-safe views.
-2. Modules 13-14: admin operations, deployment hardening,
+1. Module 13: admin operations and admin panel commands.
+2. Module 14: deployment hardening,
    monitoring.
 
 Do not build later modules on temporary storage. Module 3 is the persistent data
@@ -365,6 +381,14 @@ notification and expiry-worker foundation.
     `.venv/bin/python -m pytest -q` passed with 96 tests on 2026-06-07 after
     hardening Module 11 logging, per-item rollback, and provider fallbacks
     (same warnings).
+  - `.venv/bin/python -m compileall api bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 101 tests on 2026-06-08 after
+    Module 12 Mini App backend API implementation (same pytest-asyncio
+    warnings).
+  - `.venv/bin/python -m compileall api bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 103 tests on 2026-06-08 after
+    hardening Module 12 API logging and exception normalization (same
+    pytest-asyncio warnings).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:

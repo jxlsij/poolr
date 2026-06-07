@@ -11,6 +11,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.types import MenuButtonWebApp, WebAppInfo
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
+from api.webapp import API_SESSION_FACTORY_KEY, api_error_middleware, setup_api_routes
 from bot.config import ConfigError, load_config
 from bot.database import create_engine_and_session_factory, run_sql_migrations
 from bot.betting import create_betting_router
@@ -100,6 +101,7 @@ def create_app() -> web.Application:
         engine, session_factory = await create_engine_and_session_factory(config.DB_URL)
         app["db_engine"] = engine
         app["db_session_factory"] = session_factory
+        app[API_SESSION_FACTORY_KEY] = session_factory
         await run_sql_migrations(engine)
         dispatcher.update.middleware(DatabaseSessionMiddleware(session_factory))
         logger.info("Database session middleware registered")
@@ -118,9 +120,16 @@ def create_app() -> web.Application:
 
     dispatcher.startup.register(startup_handler)
 
-    app = web.Application()
+    app = web.Application(middlewares=[api_error_middleware])
     app.router.add_get("/", health_check)
     app.on_cleanup.append(cleanup_database)
+    setup_api_routes(
+        app,
+        bot=bot,
+        bot_token=config.BOT_TOKEN,
+        admin_ids=config.ADMIN_IDS,
+        platform_fee_pct=config.PLATFORM_FEE_PCT,
+    )
 
     webhook_handler = SimpleRequestHandler(
         dispatcher=dispatcher,
