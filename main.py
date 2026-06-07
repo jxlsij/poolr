@@ -49,13 +49,14 @@ def create_app() -> web.Application:
     dispatcher = Dispatcher()
     webhook_path = _webhook_path_from_url(config.WEBHOOK_URL)
 
-    dispatcher.startup.register(
-        lambda bot: on_startup(
+    async def startup_handler(bot: Bot) -> None:
+        await on_startup(
             bot=bot,
             webhook_url=config.WEBHOOK_URL,
             webhook_secret=config.WEBHOOK_SECRET,
         )
-    )
+
+    dispatcher.startup.register(startup_handler)
 
     app = web.Application()
     app.router.add_get("/", health_check)
@@ -103,4 +104,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
