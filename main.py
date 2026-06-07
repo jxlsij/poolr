@@ -12,6 +12,7 @@ from aiogram.types import MenuButtonWebApp, WebAppInfo
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from api.webapp import API_SESSION_FACTORY_KEY, api_error_middleware, setup_api_routes
+from bot.admin import create_admin_router
 from bot.config import ConfigError, load_config
 from bot.database import create_engine_and_session_factory, run_sql_migrations
 from bot.betting import create_betting_router
@@ -20,6 +21,9 @@ from bot.handlers.markets import create_markets_router
 from bot.handlers.start import create_start_router
 from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, InfrastructureError, setup_webhook
 from bot.middleware.database import DatabaseSessionMiddleware
+from bot.monitoring import BOT_APP_KEY, DB_SESSION_FACTORY_APP_KEY
+from bot.monitoring import health_check as detailed_health_check
+from bot.monitoring import setup_logging
 from bot.notifications import start_notification_worker, stop_notification_worker
 from bot.payments import create_payments_router
 from bot.resolution import create_resolution_router
@@ -93,6 +97,7 @@ def create_app() -> web.Application:
         )
     )
     dispatcher.include_router(create_withdrawals_router(config.ADMIN_IDS))
+    dispatcher.include_router(create_admin_router(config.ADMIN_IDS))
     dispatcher.include_router(create_payments_router(platform_fee_pct=config.PLATFORM_FEE_PCT))
     webhook_path = _webhook_path_from_url(config.WEBHOOK_URL)
     logger.info("Registering webhook handler at path %s", webhook_path)
@@ -101,6 +106,7 @@ def create_app() -> web.Application:
         engine, session_factory = await create_engine_and_session_factory(config.DB_URL)
         app["db_engine"] = engine
         app["db_session_factory"] = session_factory
+        app[DB_SESSION_FACTORY_APP_KEY] = session_factory
         app[API_SESSION_FACTORY_KEY] = session_factory
         await run_sql_migrations(engine)
         dispatcher.update.middleware(DatabaseSessionMiddleware(session_factory))
@@ -121,7 +127,9 @@ def create_app() -> web.Application:
     dispatcher.startup.register(startup_handler)
 
     app = web.Application(middlewares=[api_error_middleware])
+    app[BOT_APP_KEY] = bot
     app.router.add_get("/", health_check)
+    app.router.add_get("/health", detailed_health_check)
     app.on_cleanup.append(cleanup_database)
     setup_api_routes(
         app,
@@ -183,9 +191,10 @@ def _notification_interval_seconds() -> int:
 
 
 def main() -> None:
-    logging.basicConfig(
+    setup_logging(
         level=os.getenv("LOG_LEVEL", "INFO"),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        format=os.getenv("LOG_FORMAT", "json"),
+        log_file=os.getenv("LOG_FILE") or None,
     )
 
     try:

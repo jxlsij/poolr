@@ -89,6 +89,16 @@ after every meaningful architecture, deployment, environment, or module change.
     creation, JSON serializers, structured API errors, request-duration and
     operation-level logging, explicit validation/persistence/provider exception
     normalization, provider-failure fallbacks, and tests.
+  - Module 13: admin operations foundation. Includes `/admin_stats`,
+    `/admin_disputes`, and `/broadcast` admin-only commands, platform stats
+    aggregation, open dispute listing, broadcast FSM with per-user delivery
+    logging, Telegram Stars transaction fetch wrapper, provider/validation
+    error types, admin access checks, and tests.
+  - Module 14: deployment and monitoring hardening. Includes structured JSON or
+    pretty logging setup, optional log-file sink, `/health` JSON endpoint with
+    database probe and bot status, root `OK` health compatibility for Hugging
+    Face, payment anomaly scanning helpers, typed aiohttp app keys for
+    monitoring state, operation logging, and tests.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
     emoji-free Markdown caption, removes any stale reply keyboard from older
     versions, and no longer adds a per-message button; startup configures the
@@ -185,6 +195,12 @@ after every meaningful architecture, deployment, environment, or module change.
   persistence, and Telegram provider failures.
 - `bot/config.py`: `Config`, `.env`/environment loading, config validation,
   redacted config logging.
+- `bot/admin.py`: Module 13 admin operations. Provides admin-only stats,
+  dispute listing, broadcast flow, platform stats aggregation, and Stars
+  transaction fetch wrapper.
+- `bot/monitoring.py`: Module 14 deployment/monitoring helpers. Provides
+  structured logging setup, `/health` JSON response logic, and payment anomaly
+  scanning.
 - `bot/infrastructure.py`: `setup_webhook`, `create_db_pool`, async PostgreSQL
   URL normalization, infrastructure errors. Supabase pooler URLs with
   `sslmode=require` are normalized to asyncpg-compatible `ssl=require`, and the
@@ -283,6 +299,8 @@ Optional:
 - `NOTIFICATION_CHECK_INTERVAL_SECONDS`: background expiry worker interval;
   defaults to `300`.
 - `LOG_LEVEL`: defaults to `INFO`.
+- `LOG_FORMAT`: `json` or `pretty`; defaults to `json`.
+- `LOG_FILE`: optional path for an additional log-file sink.
 - `PORT`: defaults to `7860`.
 
 Never commit real secrets or real `.env` files.
@@ -332,9 +350,10 @@ Never commit real secrets or real `.env` files.
 
 Continue following the dependency chain from the plan:
 
-1. Module 13: admin operations and admin panel commands.
-2. Module 14: deployment hardening,
-   monitoring.
+Modules 1-14 from the historical MVP plan now have implementation foundations.
+Next work should focus on production hardening, real Mini App frontend, terms
+and payment support copy, economic simulation, legal/compliance review, and
+real 1-Star Telegram payment-cycle validation.
 
 Do not build later modules on temporary storage. Module 3 is the persistent data
 foundation; Module 4 is the implicit identity/session foundation; Module 5 is
@@ -389,6 +408,10 @@ notification and expiry-worker foundation.
     `.venv/bin/python -m pytest -q` passed with 103 tests on 2026-06-08 after
     hardening Module 12 API logging and exception normalization (same
     pytest-asyncio warnings).
+  - `.venv/bin/python -m compileall api bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 112 tests on 2026-06-08 after
+    Module 13 admin operations and Module 14 deployment/monitoring hardening
+    (same pytest-asyncio warnings).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:
@@ -403,8 +426,9 @@ notification and expiry-worker foundation.
 - The exact fee model, reserve policy, withdrawal minimum, payout batching
   cadence, and TON conversion/spread rules are not finalized.
 - Rounding rules for payout distribution are not finalized.
-- Manual payout operations need an admin queue, audit trail, and transaction hash
-  recording.
+- Manual payout operations now have bot-side admin review callbacks and admin
+  stats/dispute commands, but still need a richer Mini App/admin-panel queue for
+  production operations.
 - Partial refund behavior for Stars payments still needs real Telegram API
   validation for disputes/support only, not as the default payout mechanism.
 - Anti-fraud thresholds are provisional lightweight heuristics; tune with real
