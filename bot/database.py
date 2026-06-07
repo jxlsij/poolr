@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -69,3 +71,39 @@ async def create_all_tables(engine: AsyncEngine) -> None:
         logger.exception("Failed to create database tables")
         raise DatabaseSessionError("Database table creation failed") from exc
     logger.info("Database tables created")
+
+
+async def run_sql_migrations(
+    engine: AsyncEngine,
+    migrations_dir: str | Path = "migrations",
+) -> None:
+    migrations_path = Path(migrations_dir)
+    if not migrations_path.exists():
+        logger.warning("Migrations directory not found: %s", migrations_path)
+        return
+
+    migration_files = sorted(migrations_path.glob("*.sql"))
+    if not migration_files:
+        logger.warning("No SQL migrations found in %s", migrations_path)
+        return
+
+    logger.info("Running SQL migrations: count=%d", len(migration_files))
+    try:
+        async with engine.begin() as conn:
+            for migration_file in migration_files:
+                sql = migration_file.read_text().strip()
+                if not sql:
+                    logger.debug("Skipping empty SQL migration: %s", migration_file.name)
+                    continue
+                logger.info("Applying SQL migration: %s", migration_file.name)
+                for statement in _split_sql_statements(sql):
+                    await conn.execute(text(statement))
+    except (OSError, SQLAlchemyError) as exc:
+        logger.exception("Failed to run SQL migrations")
+        raise DatabaseSessionError("SQL migration failed") from exc
+
+    logger.info("SQL migrations completed")
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    return [statement.strip() for statement in sql.split(";") if statement.strip()]

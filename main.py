@@ -11,7 +11,7 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from bot.config import ConfigError, load_config
-from bot.database import create_engine_and_session_factory
+from bot.database import create_engine_and_session_factory, run_sql_migrations
 from bot.handlers.markets import create_markets_router
 from bot.handlers.start import create_start_router
 from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, InfrastructureError, setup_webhook
@@ -66,6 +66,7 @@ def create_app() -> web.Application:
         engine, session_factory = await create_engine_and_session_factory(config.DB_URL)
         app["db_engine"] = engine
         app["db_session_factory"] = session_factory
+        await run_sql_migrations(engine)
         dispatcher.update.middleware(DatabaseSessionMiddleware(session_factory))
         logger.info("Database session middleware registered")
         await on_startup(

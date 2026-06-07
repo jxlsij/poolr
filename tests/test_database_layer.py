@@ -25,7 +25,13 @@ from bot.crud import (
     update_market_status,
     update_user_balance,
 )
-from bot.database import create_all_tables, create_session_factory, session_scope
+from bot.database import (
+    DatabaseSessionError,
+    create_all_tables,
+    create_session_factory,
+    run_sql_migrations,
+    session_scope,
+)
 from bot.models import Base, DepositStatus, MarketStatus
 
 
@@ -196,3 +202,35 @@ async def test_bets_and_pool_by_option(session_factory) -> None:
 
         assert await get_pool_by_option(session, market.id) == {0: 10, 1: 25}
         assert await get_user_bet_on_market(session, 101, market.id) == first_bet
+
+
+@pytest.mark.asyncio
+async def test_run_sql_migrations_applies_sql_files(tmp_path) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    (migrations_dir / "0001_create_test_table.sql").write_text(
+        "CREATE TABLE IF NOT EXISTS migration_test (id INTEGER PRIMARY KEY)"
+    )
+    try:
+        await run_sql_migrations(engine, migrations_dir)
+        async with engine.begin() as conn:
+            result = await conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='migration_test'"
+            )
+            assert result.scalar_one() == "migration_test"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_sql_migrations_wraps_sqlalchemy_errors(tmp_path) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    (migrations_dir / "0001_bad.sql").write_text("CREATE TABLE broken (")
+    try:
+        with pytest.raises(DatabaseSessionError):
+            await run_sql_migrations(engine, migrations_dir)
+    finally:
+        await engine.dispose()
