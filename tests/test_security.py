@@ -51,9 +51,43 @@ def test_validate_webapp_init_data_rejects_tampered_data() -> None:
     assert validate_webapp_init_data(tampered, bot_token) is None
 
 
+def test_validate_webapp_init_data_rejects_malformed_user_json() -> None:
+    bot_token = "123456:test-token"
+    init_data_raw = _build_init_data(
+        bot_token=bot_token,
+        values={"auth_date": "1710000000", "user": '{"id":42'},
+    )
+
+    assert validate_webapp_init_data(init_data_raw, bot_token) is None
+
+
+def test_validate_webapp_init_data_rejects_duplicate_hash() -> None:
+    bot_token = "123456:test-token"
+    init_data_raw = _build_init_data(
+        bot_token=bot_token,
+        values={"auth_date": "1710000000"},
+    )
+
+    assert validate_webapp_init_data(f"{init_data_raw}&hash=duplicate", bot_token) is None
+
+
+def test_validate_webapp_init_data_rejects_duplicate_field() -> None:
+    bot_token = "123456:test-token"
+    init_data_raw = _build_init_data(
+        bot_token=bot_token,
+        values={"auth_date": "1710000000"},
+    )
+
+    assert (
+        validate_webapp_init_data(f"{init_data_raw}&auth_date=1710000000", bot_token)
+        is None
+    )
+
+
 def test_is_admin() -> None:
     assert is_admin(1, [1, 2, 3]) is True
     assert is_admin(4, [1, 2, 3]) is False
+    assert is_admin(1, ["bad"]) is False
 
 
 def _build_init_data(bot_token: str, values: dict[str, str]) -> str:
@@ -72,4 +106,3 @@ def _build_init_data(bot_token: str, values: dict[str, str]) -> str:
     ).hexdigest()
     payload = {**values, "hash": data_hash}
     return urlencode(payload, quote_via=quote)
-
