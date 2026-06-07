@@ -1,0 +1,2 @@
+bot/assets/start_message.png filter=lfs diff=lfs merge=lfs -text
+frontend/assets/*.png filter=lfs diff=lfs merge=lfs -text
