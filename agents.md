@@ -36,6 +36,13 @@ after every meaningful architecture, deployment, environment, or module change.
     market card publishing/updating helpers, `message_id` persistence, inline
     result/card generation, `inline_message_id` persistence, bet buttons for
     Module 7, logging, exception wrapping, and tests.
+  - Module 7: betting engine and market card updates. Includes bet callback
+    parsing, stake amount FSM prompt, market-specific Stars invoice payloads,
+    stake pre-checkout validation, successful stake payment handling,
+    idempotent `charge_id` persistence, internal Stars credit-then-debit stake
+    recording, creator/minimum/deadline/option/balance validation,
+    probability/payout estimate helpers, normal and inline market card edits,
+    betting router wiring, logging, exception wrapping, and tests.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
     emoji-free Markdown caption and an Open button; now also silently ensures
     the Telegram user when a database session is available.
@@ -135,12 +142,20 @@ after every meaningful architecture, deployment, environment, or module change.
 - `bot/middleware/database.py`: aiogram middleware that injects `db_session`
   into update handlers, logs update-session lifecycle, and commits/rolls back
   via `session_scope`.
+- `bot/betting.py`: Module 7 betting service/router. Handles
+  `bet:{market_id}:{option_index}` callbacks, collects stake amount, sends
+  market-specific Stars invoices, validates stake payment payloads, records
+  direct stakes into `deposits` plus `bets`, updates market cards, and exposes
+  `place_bet`, `validate_bet_request`, `calculate_implied_probability`, and
+  `estimate_payout`.
 - `bot/payments.py`: Module 5 direct Stars stake intake helpers and router:
   `send_deposit_invoice`, `handle_pre_checkout_query`,
   `handle_successful_payment`, `credit_credits`, `debit_credits`, and compact
-  payment payload parsing/building. It wraps Telegram provider/API failures,
-  validates pre-checkout quickly, keeps payment persistence separate from
-  best-effort user notifications, and avoids logging raw payload secrets.
+  payment payload parsing/building. It now dispatches market-stake payloads to
+  Module 7 while preserving the older deposit payload helpers. It wraps
+  Telegram provider/API failures, validates pre-checkout quickly, keeps payment
+  persistence separate from best-effort user notifications, and avoids logging
+  raw payload secrets.
   Function names still match the old plan, but user-facing behavior should
   remain Stars-first, not credits-first.
 - `bot/handlers/markets.py`: Module 6 market creation FSM and market card
@@ -231,21 +246,18 @@ Never commit real secrets or real `.env` files.
 
 Continue following the dependency chain from the plan:
 
-1. Module 7: betting engine and market card updates. Wire market-specific bet
-   buttons to Module 5 invoice payloads/handlers when market IDs and option IDs
-   exist.
-2. Module 8: resolution, fee calculation, payout distribution, and internal
+1. Module 8: resolution, fee calculation, payout distribution, and internal
    withdrawable balance.
-3. Module 9: Mini App withdrawal requests plus admin-reviewed manual
+2. Module 9: Mini App withdrawal requests plus admin-reviewed manual
    TON-equivalent payouts. Do not implement FIFO `charge_id` refunds as normal
    withdrawals.
-4. Modules 10-14: anti-fraud, disputes, notifications, API, admin, deployment,
+3. Modules 10-14: anti-fraud, disputes, notifications, API, admin, deployment,
    monitoring.
 
 Do not build later modules on temporary storage. Module 3 is the persistent data
 foundation; Module 4 is the implicit identity/session foundation; Module 5 is
 the Stars payment intake foundation; Module 6 is the group market card
-foundation.
+foundation; Module 7 is the direct betting/stake foundation.
 
 ## Testing And Verification
 
@@ -259,6 +271,8 @@ foundation.
   - `.venv/bin/python -m compileall bot tests main.py`
   - `.venv/bin/python -m pytest -q` passed with 53 tests on 2026-06-07
     (pytest-asyncio deprecation warnings from Python 3.14).
+  - `.venv/bin/python -m pytest -q` passed with 61 tests on 2026-06-07 after
+    Module 7 betting engine implementation (same pytest-asyncio warnings).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:

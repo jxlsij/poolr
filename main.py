@@ -12,6 +12,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 
 from bot.config import ConfigError, load_config
 from bot.database import create_engine_and_session_factory, run_sql_migrations
+from bot.betting import create_betting_router
 from bot.handlers.markets import create_markets_router
 from bot.handlers.start import create_start_router
 from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, InfrastructureError, setup_webhook
@@ -58,6 +59,7 @@ def create_app() -> web.Application:
     dispatcher = Dispatcher()
     dispatcher.include_router(create_start_router(_resolve_open_url(config.WEBHOOK_URL)))
     dispatcher.include_router(create_markets_router(os.getenv("MINI_APP_URL")))
+    dispatcher.include_router(create_betting_router(os.getenv("MINI_APP_URL")))
     dispatcher.include_router(create_payments_router())
     webhook_path = _webhook_path_from_url(config.WEBHOOK_URL)
     logger.info("Registering webhook handler at path %s", webhook_path)

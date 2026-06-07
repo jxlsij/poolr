@@ -85,8 +85,6 @@ async def handle_pre_checkout_query(
     query: PreCheckoutQuery,
     session: AsyncSession,
 ) -> None:
-    del session
-
     logger.info(
         "Handling pre-checkout query: query_id=%s user_id=%s currency=%s amount=%s",
         query.id,
@@ -95,13 +93,27 @@ async def handle_pre_checkout_query(
         query.total_amount,
     )
     try:
-        payload = parse_deposit_invoice_payload(query.invoice_payload)
-        _validate_stars_payment(
-            currency=query.currency,
-            total_amount=query.total_amount,
-            payload=payload,
-            payer_id=query.from_user.id if query.from_user else None,
-        )
+        payload = parse_invoice_payload(query.invoice_payload)
+        payer_id = query.from_user.id if query.from_user else None
+        if payload["type"] == PAYLOAD_TYPE_DIRECT_STAKE:
+            _validate_stars_payment(
+                currency=query.currency,
+                total_amount=query.total_amount,
+                payload=payload,
+                payer_id=payer_id,
+            )
+        else:
+            from bot.betting import validate_stake_pre_checkout
+
+            validation_error = await validate_stake_pre_checkout(
+                session=session,
+                payload=payload,
+                payer_id=payer_id,
+                currency=query.currency,
+                total_amount=query.total_amount,
+            )
+            if validation_error is not None:
+                raise PaymentValidationError(validation_error.value)
     except PaymentValidationError as exc:
         logger.warning(
             "Rejecting Stars pre-checkout query: query_id=%s reason=%s",
@@ -145,13 +157,35 @@ async def handle_successful_payment(
     )
 
     try:
-        payload = parse_deposit_invoice_payload(payment.invoice_payload)
-        _validate_stars_payment(
-            currency=payment.currency,
-            total_amount=payment.total_amount,
-            payload=payload,
-            payer_id=payer_id,
-        )
+        payload = parse_invoice_payload(payment.invoice_payload)
+        if payload["type"] == PAYLOAD_TYPE_DIRECT_STAKE:
+            _validate_stars_payment(
+                currency=payment.currency,
+                total_amount=payment.total_amount,
+                payload=payload,
+                payer_id=payer_id,
+            )
+        else:
+            from bot.betting import (
+                BettingModuleError,
+                handle_successful_stake_payment,
+                validate_stake_pre_checkout,
+            )
+
+            validation_error = await validate_stake_pre_checkout(
+                session=session,
+                payload=payload,
+                payer_id=payer_id,
+                currency=payment.currency,
+                total_amount=payment.total_amount,
+            )
+            if validation_error is not None:
+                raise PaymentValidationError(validation_error.value)
+            try:
+                await handle_successful_stake_payment(message, session, payload)
+            except BettingModuleError as exc:
+                raise PaymentPersistenceError("Stake payment processing failed") from exc
+            return
     except PaymentValidationError:
         logger.warning(
             "Rejected successful payment payload: user_id=%s charge_id=%s",
@@ -256,6 +290,13 @@ def build_deposit_invoice_payload(user_id: int, stars_amount: int) -> str:
 
 
 def parse_deposit_invoice_payload(payload: str) -> dict[str, int]:
+    parsed = parse_invoice_payload(payload)
+    if parsed["type"] != PAYLOAD_TYPE_DIRECT_STAKE:
+        raise PaymentValidationError("invoice payload type is unsupported")
+    return {"user_id": parsed["user_id"], "stars_amount": parsed["stars_amount"]}
+
+
+def parse_invoice_payload(payload: str) -> dict[str, Any]:
     _require_text(payload, "payload")
     try:
         raw_payload = json.loads(payload)
@@ -264,12 +305,25 @@ def parse_deposit_invoice_payload(payload: str) -> dict[str, int]:
 
     if not isinstance(raw_payload, Mapping):
         raise PaymentValidationError("invoice payload must be a JSON object")
-    if raw_payload.get("t") != PAYLOAD_TYPE_DIRECT_STAKE:
-        raise PaymentValidationError("invoice payload type is unsupported")
 
-    user_id = _require_positive_int(raw_payload.get("u"), "payload.user_id")
-    stars_amount = _require_positive_int(raw_payload.get("a"), "payload.stars_amount")
-    return {"user_id": user_id, "stars_amount": stars_amount}
+    payload_type = raw_payload.get("t")
+    if payload_type == PAYLOAD_TYPE_DIRECT_STAKE:
+        user_id = _require_positive_int(raw_payload.get("u"), "payload.user_id")
+        stars_amount = _require_positive_int(raw_payload.get("a"), "payload.stars_amount")
+        return {
+            "type": PAYLOAD_TYPE_DIRECT_STAKE,
+            "user_id": user_id,
+            "stars_amount": stars_amount,
+        }
+
+    from bot.betting import PAYLOAD_TYPE_MARKET_STAKE, parse_stake_invoice_payload
+
+    if payload_type == PAYLOAD_TYPE_MARKET_STAKE:
+        parsed_stake = parse_stake_invoice_payload(payload)
+        parsed_stake["type"] = PAYLOAD_TYPE_MARKET_STAKE
+        return parsed_stake
+
+    raise PaymentValidationError("invoice payload type is unsupported")
 
 
 def create_payments_router() -> Router:

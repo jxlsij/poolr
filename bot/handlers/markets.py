@@ -541,6 +541,34 @@ async def update_market_card(
         raise MarketCreationPersistenceError("Failed to update market card") from exc
 
 
+async def update_inline_market_card(
+    bot: Bot,
+    inline_message_id: str,
+    market: Market,
+    pool_by_option: dict[int, int],
+    mini_app_url: str | None = None,
+) -> None:
+    logger.info(
+        "Updating inline market card: market_id=%d inline_message_id_set=%s",
+        market.id,
+        bool(inline_message_id),
+    )
+    try:
+        await bot.edit_message_text(
+            inline_message_id=inline_message_id,
+            text=build_market_card_text(market, pool_by_option),
+            reply_markup=build_market_keyboard(
+                market_id=market.id,
+                options=market.options,
+                status=market.status,
+                mini_app_url=mini_app_url,
+            ),
+        )
+    except Exception as exc:
+        logger.exception("Failed to update inline market card: market_id=%d", market.id)
+        raise MarketCreationPersistenceError("Failed to update inline market card") from exc
+
+
 def _message_text(message: Message) -> str:
     if not isinstance(message.text, str) or not message.text.strip():
         raise MarketCreationValidationError("Please send text.")
