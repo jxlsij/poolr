@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from bot.config import ConfigError, load_config
+from bot.config import ConfigError, _redact_db_url, load_config
 
 
 def test_load_config_reads_env_file(tmp_path: Path, monkeypatch) -> None:
@@ -76,3 +76,11 @@ def test_load_config_requires_database_url(tmp_path: Path, monkeypatch) -> None:
     else:
         raise AssertionError("ConfigError was not raised")
 
+
+def test_redact_db_url_hides_password() -> None:
+    redacted = _redact_db_url(
+        "postgresql://postgres:secret@db.example.supabase.co:5432/postgres"
+    )
+
+    assert redacted == "postgresql://postgres:***@db.example.supabase.co:5432/postgres"
+    assert "secret" not in redacted

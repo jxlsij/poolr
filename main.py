@@ -11,14 +11,14 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from bot.config import ConfigError, load_config
-from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, setup_webhook
+from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, InfrastructureError, setup_webhook
 
 
 logger = logging.getLogger(__name__)
 
 
 async def health_check(request: web.Request) -> web.Response:
-    logger.info("Health ping received")
+    logger.info("Health ping received from %s", request.remote)
     return web.Response(text="OK")
 
 
@@ -30,11 +30,14 @@ async def on_startup(bot: Bot, webhook_url: str, webhook_secret: str) -> None:
         allowed_updates=DEFAULT_ALLOWED_UPDATES,
     )
     logger.info("Webhook setup result: %s", ok)
+    if not ok:
+        raise InfrastructureError("Telegram webhook setup returned false")
 
 
 def create_bot(token: str) -> Bot:
     telegram_api_url = os.getenv("TELEGRAM_API_URL")
     if not telegram_api_url:
+        logger.info("Using default Telegram API endpoint")
         return Bot(token=token)
 
     api_base = _normalize_aiogram_api_base(telegram_api_url)
@@ -44,10 +47,12 @@ def create_bot(token: str) -> Bot:
 
 
 def create_app() -> web.Application:
+    logger.info("Creating web application")
     config = load_config()
     bot = create_bot(config.BOT_TOKEN)
     dispatcher = Dispatcher()
     webhook_path = _webhook_path_from_url(config.WEBHOOK_URL)
+    logger.info("Registering webhook handler at path %s", webhook_path)
 
     async def startup_handler(bot: Bot) -> None:
         await on_startup(
@@ -97,9 +102,22 @@ def main() -> None:
         logger.warning("Config is incomplete: %s", exc)
         app = web.Application()
         app.router.add_get("/", health_check)
+    except Exception:
+        logger.exception("Application setup failed")
+        raise
 
-    port = int(os.getenv("PORT", "7860"))
-    web.run_app(app, host="0.0.0.0", port=port)
+    try:
+        port = int(os.getenv("PORT", "7860"))
+    except ValueError as exc:
+        logger.exception("PORT must be an integer")
+        raise RuntimeError("PORT must be an integer") from exc
+
+    logger.info("Starting web server on 0.0.0.0:%d", port)
+    try:
+        web.run_app(app, host="0.0.0.0", port=port)
+    except Exception:
+        logger.exception("Web server stopped unexpectedly")
+        raise
 
 
 if __name__ == "__main__":

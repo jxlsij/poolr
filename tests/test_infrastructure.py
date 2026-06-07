@@ -1,4 +1,4 @@
-from bot.infrastructure import _normalize_async_postgres_url
+from bot.infrastructure import _normalize_async_postgres_url, _redact_db_url
 
 
 def test_normalize_postgres_url_for_asyncpg() -> None:
@@ -15,3 +15,9 @@ def test_normalize_postgres_url_for_asyncpg() -> None:
         == "postgresql+asyncpg://user:pass@localhost/db"
     )
 
+
+def test_redact_db_url_hides_password() -> None:
+    redacted = _redact_db_url("postgresql+asyncpg://user:pass@localhost/db")
+
+    assert redacted == "postgresql+asyncpg://user:***@localhost/db"
+    assert "pass" not in redacted
