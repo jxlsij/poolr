@@ -5,7 +5,7 @@ from pathlib import Path
 
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import FSInputFile, KeyboardButton, Message, ReplyKeyboardMarkup, WebAppInfo
+from aiogram.types import FSInputFile, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.users import UserModuleError, ensure_user
@@ -17,7 +17,7 @@ START_MESSAGE_TEXT = """*Привет! Я Poolr.* Создавай prediction ma
 
 *Как создать рынок:*
 `@pooolr_bot Will Max be late?`
-или просто нажми *Open* ниже.
+или просто нажми *Open* в меню бота.
 
 — Создавай пулы
 — Делай предсказания
@@ -26,7 +26,7 @@ START_MESSAGE_TEXT = """*Привет! Я Poolr.* Создавай prediction ma
 START_IMAGE_PATH = Path(__file__).resolve().parents[1] / "assets" / "start_message.png"
 
 
-def create_start_router(open_url: str) -> Router:
+def create_start_router() -> Router:
     router = Router(name="start")
 
     @router.message(CommandStart())
@@ -48,19 +48,11 @@ def create_start_router(open_url: str) -> Router:
         elif db_session is None:
             logger.warning("Skipping /start user identity because db_session is missing")
 
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Open", web_app=WebAppInfo(url=open_url))],
-            ],
-            resize_keyboard=True,
-        )
-
         if START_IMAGE_PATH.exists():
             await message.answer_photo(
                 photo=FSInputFile(START_IMAGE_PATH),
                 caption=START_MESSAGE_TEXT,
                 parse_mode="Markdown",
-                reply_markup=keyboard,
             )
             return
 
@@ -68,7 +60,6 @@ def create_start_router(open_url: str) -> Router:
         await message.answer(
             text=START_MESSAGE_TEXT,
             parse_mode="Markdown",
-            reply_markup=keyboard,
         )
 
     return router

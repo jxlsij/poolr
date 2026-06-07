@@ -8,6 +8,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
+from aiogram.types import MenuButtonWebApp, WebAppInfo
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from bot.config import ConfigError, load_config
@@ -32,7 +33,9 @@ async def health_check(request: web.Request) -> web.Response:
     return web.Response(text="OK")
 
 
-async def on_startup(bot: Bot, webhook_url: str, webhook_secret: str) -> None:
+async def on_startup(bot: Bot, webhook_url: str, webhook_secret: str, open_url: str) -> None:
+    await setup_web_app_menu_button(bot=bot, open_url=open_url)
+
     ok = await setup_webhook(
         bot=bot,
         webhook_url=webhook_url,
@@ -42,6 +45,16 @@ async def on_startup(bot: Bot, webhook_url: str, webhook_secret: str) -> None:
     logger.info("Webhook setup result: %s", ok)
     if not ok:
         raise InfrastructureError("Telegram webhook setup returned false")
+
+
+async def setup_web_app_menu_button(bot: Bot, open_url: str) -> None:
+    await bot.set_chat_menu_button(
+        menu_button=MenuButtonWebApp(
+            text="Open",
+            web_app=WebAppInfo(url=open_url),
+        )
+    )
+    logger.info("Telegram Web App menu button configured")
 
 
 def create_bot(token: str) -> Bot:
@@ -61,7 +74,8 @@ def create_app() -> web.Application:
     config = load_config()
     bot = create_bot(config.BOT_TOKEN)
     dispatcher = Dispatcher()
-    dispatcher.include_router(create_start_router(_resolve_open_url(config.WEBHOOK_URL)))
+    open_url = _resolve_open_url(config.WEBHOOK_URL)
+    dispatcher.include_router(create_start_router())
     dispatcher.include_router(create_markets_router(os.getenv("MINI_APP_URL")))
     dispatcher.include_router(create_betting_router(os.getenv("MINI_APP_URL")))
     dispatcher.include_router(
@@ -99,6 +113,7 @@ def create_app() -> web.Application:
             bot=bot,
             webhook_url=config.WEBHOOK_URL,
             webhook_secret=config.WEBHOOK_SECRET,
+            open_url=open_url,
         )
 
     dispatcher.startup.register(startup_handler)

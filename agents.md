@@ -81,9 +81,9 @@ after every meaningful architecture, deployment, environment, or module change.
     optional APScheduler-compatible `schedule_market_jobs`, migration
     `0005_notification_logs.sql`, and tests.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
-    emoji-free Markdown caption and a persistent bottom Web App Open button;
-    now also silently ensures the Telegram user when a database session is
-    available.
+    emoji-free Markdown caption and no per-message keyboard; startup configures
+    the native Telegram Bot Menu Web App `Open` button, and `/start` silently
+    ensures the Telegram user when a database session is available.
 
 ## Product Direction
 
@@ -163,7 +163,8 @@ after every meaningful architecture, deployment, environment, or module change.
 ## Project Layout
 
 - `main.py`: aiohttp app entrypoint, health-check, aiogram webhook mounting,
-  webhook registration, custom Telegram API endpoint support.
+  webhook registration, native Telegram Bot Menu Web App button setup, custom
+  Telegram API endpoint support.
 - `bot/config.py`: `Config`, `.env`/environment loading, config validation,
   redacted config logging.
 - `bot/infrastructure.py`: `setup_webhook`, `create_db_pool`, async PostgreSQL
@@ -228,8 +229,8 @@ after every meaningful architecture, deployment, environment, or module change.
   deadline, 1 Star min stake, and callback data
   `bet:{market_id}:{option_index}` for Module 7.
 - `bot/security.py`: Module 2 security functions and `AdminMiddleware`.
-- `bot/handlers/start.py`: `/start` handler and bottom Web App Open button
-  composition.
+- `bot/handlers/start.py`: `/start` handler and start-message composition; the
+  Open button is configured globally in `main.py` through Telegram Bot Menu.
 - `bot/assets/start_message.png`: image sent by `/start`.
 - `api/`: reserved for Mini App backend endpoints.
 - `frontend/`: reserved for React/Tailwind Mini App.
