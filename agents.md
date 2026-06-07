@@ -81,8 +81,9 @@ after every meaningful architecture, deployment, environment, or module change.
     optional APScheduler-compatible `schedule_market_jobs`, migration
     `0005_notification_logs.sql`, and tests.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
-    emoji-free Markdown caption and no per-message keyboard; startup configures
-    the native Telegram Bot Menu Web App `Open` button, and `/start` silently
+    emoji-free Markdown caption, removes any stale reply keyboard from older
+    versions, and no longer adds a per-message button; startup configures the
+    native Telegram Bot Menu Web App `Open` button, and `/start` silently
     ensures the Telegram user when a database session is available.
 
 ## Product Direction

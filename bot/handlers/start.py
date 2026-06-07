@@ -5,7 +5,7 @@ from pathlib import Path
 
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import FSInputFile, Message
+from aiogram.types import FSInputFile, Message, ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.users import UserModuleError, ensure_user
@@ -53,6 +53,7 @@ def create_start_router() -> Router:
                 photo=FSInputFile(START_IMAGE_PATH),
                 caption=START_MESSAGE_TEXT,
                 parse_mode="Markdown",
+                reply_markup=ReplyKeyboardRemove(),
             )
             return
 
@@ -60,6 +61,7 @@ def create_start_router() -> Router:
         await message.answer(
             text=START_MESSAGE_TEXT,
             parse_mode="Markdown",
+            reply_markup=ReplyKeyboardRemove(),
         )
 
     return router
