@@ -7,7 +7,8 @@ after every meaningful architecture, deployment, environment, or module change.
 
 - Product: Telegram bot plus Mini App for group prediction markets.
 - Stack: Python 3.11+, aiogram 3.x, aiohttp, SQLAlchemy async, asyncpg,
-  PostgreSQL/Supabase, Hugging Face Spaces Docker, Cloudflare Worker proxy.
+  PostgreSQL/Supabase, Pillow for generated market card PNGs, Hugging Face
+  Spaces Docker, Cloudflare Worker proxy.
 - Source plan: `prediction_market_mvp_plan.md`. Treat it as the historical
   baseline; the product/payment direction in this `agents.md` supersedes older
   "credits deposit then withdraw" wording in the plan.
