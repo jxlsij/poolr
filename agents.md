@@ -104,7 +104,9 @@ after every meaningful architecture, deployment, environment, or module change.
     button, re-applies the per-chat native Telegram Bot Menu Web App `Open`
     button as a fallback when `/start` is used, and silently ensures the
     Telegram user when a database session is available. Startup still configures
-    the global native Telegram Bot Menu Web App `Open` button.
+    the global native Telegram Bot Menu Web App `Open` button, and market card
+    keyboards now use the resolved webhook-derived `open_url` fallback when
+    `MINI_APP_URL` is absent.
   - Mini App frontend shell: a vanilla HTML/CSS/JS app under `frontend/`
     served at `/app`, with Telegram WebApp bootstrap, first-entry onboarding
     disclaimers, live markets/activity/wallet views, Stars bet and deposit

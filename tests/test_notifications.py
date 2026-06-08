@@ -42,6 +42,7 @@ class FakeBot:
         self.fail_send = fail_send
         self.sent_messages: list[dict] = []
         self.edited_messages: list[dict] = []
+        self.edited_media: list[dict] = []
 
     async def send_message(self, **kwargs):
         if self.fail_send:
@@ -50,6 +51,9 @@ class FakeBot:
 
     async def edit_message_text(self, **kwargs):
         self.edited_messages.append(kwargs)
+
+    async def edit_message_media(self, **kwargs):
+        self.edited_media.append(kwargs)
 
 
 class CreatorBlockedBot(FakeBot):
@@ -126,7 +130,8 @@ async def test_run_expiry_check_closes_and_auto_cancels_stale_market(session_fac
     assert bettor is not None
     assert bettor.balance_credits == 7
     assert any(message["chat_id"] == 101 for message in bot.sent_messages)
-    assert any("Waiting for the creator" in edit["text"] for edit in bot.edited_messages)
+    assert bot.edited_messages == []
+    assert any(edit["chat_id"] == -100 for edit in bot.edited_media)
     assert [(log.kind, log.market_id) for log in logs] == [
         ("market_auto_cancelled", market.id),
         ("market_closed", market.id),
@@ -154,8 +159,8 @@ async def test_market_closed_notification_tolerates_creator_dm_failure(session_f
         logs = list((await session.scalars(select(NotificationLog))).all())
 
     assert result.market_closed_sent == 1
-    assert len(bot.edited_messages) == 1
-    assert bot.edited_messages[0]["message_id"] == 777
+    assert len(bot.edited_media) == 1
+    assert bot.edited_media[0]["message_id"] == 777
     assert [(log.kind, log.market_id) for log in logs] == [("market_closed", market.id)]
 
 

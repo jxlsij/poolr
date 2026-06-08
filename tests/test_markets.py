@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 from aiogram.types import User as TelegramUser
+from PIL import Image
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from bot.crud import get_active_markets_in_chat, get_market
@@ -21,6 +23,7 @@ from bot.handlers.markets import (
     publish_market_card,
     update_market_card,
 )
+from bot.market_cards import render_market_card_image
 from bot.models import Base, Market, MarketStatus
 
 
@@ -40,7 +43,9 @@ class FakeBot:
     def __init__(self, should_fail: bool = False) -> None:
         self.should_fail = should_fail
         self.sent_messages: list[dict] = []
+        self.sent_photos: list[dict] = []
         self.edited_messages: list[dict] = []
+        self.edited_media: list[dict] = []
 
     async def send_message(self, **kwargs):
         if self.should_fail:
@@ -48,10 +53,21 @@ class FakeBot:
         self.sent_messages.append(kwargs)
         return SimpleNamespace(message_id=555)
 
+    async def send_photo(self, **kwargs):
+        if self.should_fail:
+            raise RuntimeError("send failed")
+        self.sent_photos.append(kwargs)
+        return SimpleNamespace(message_id=555)
+
     async def edit_message_text(self, **kwargs):
         if self.should_fail:
             raise RuntimeError("edit failed")
         self.edited_messages.append(kwargs)
+
+    async def edit_message_media(self, **kwargs):
+        if self.should_fail:
+            raise RuntimeError("edit failed")
+        self.edited_media.append(kwargs)
 
 
 class FakeInlineQuery:
@@ -113,6 +129,24 @@ def test_build_market_card_text_and_keyboard() -> None:
     assert "Yes - 30 Stars (75%)" in text
     assert keyboard.inline_keyboard[0][0].callback_data == "bet:123:0"
     assert keyboard.inline_keyboard[1][0].callback_data == "bet:123:1"
+
+
+def test_build_market_keyboard_includes_open_button_when_url_present() -> None:
+    market = _market()
+
+    keyboard = build_market_keyboard(market.id, market.options, market.status, mini_app_url="https://example.com/app")
+
+    assert keyboard.inline_keyboard[-1][0].text == "Open"
+    assert keyboard.inline_keyboard[-1][0].url == "https://example.com/app"
+
+
+def test_render_market_card_image_produces_png() -> None:
+    image_bytes = render_market_card_image(_market(), {0: 30, 1: 10})
+
+    assert image_bytes.startswith(b"\x89PNG")
+    with Image.open(BytesIO(image_bytes)) as image:
+        assert image.size == (1200, 960)
+        assert image.mode == "RGB"
 
 
 def test_build_inline_market_result() -> None:
@@ -181,8 +215,9 @@ async def test_publish_market_card_sends_message() -> None:
     message = await publish_market_card(bot, -100, market, {0: 0, 1: 0})
 
     assert message.message_id == 555
-    assert bot.sent_messages[0]["chat_id"] == -100
-    assert "Will Max be late?" in bot.sent_messages[0]["text"]
+    assert bot.sent_photos[0]["chat_id"] == -100
+    assert bot.sent_photos[0]["caption"].startswith("Poolr market #123")
+    assert bot.sent_photos[0]["photo"].filename == "market-123.png"
 
 
 @pytest.mark.asyncio
@@ -200,9 +235,9 @@ async def test_update_market_card_edits_message() -> None:
 
     await update_market_card(bot, -100, 555, market, {0: 5, 1: 5})
 
-    assert bot.edited_messages[0]["chat_id"] == -100
-    assert bot.edited_messages[0]["message_id"] == 555
-    assert "Pool: 10 Stars" in bot.edited_messages[0]["text"]
+    assert bot.edited_media[0]["chat_id"] == -100
+    assert bot.edited_media[0]["message_id"] == 555
+    assert bot.edited_media[0]["media"].caption.startswith("Poolr market #123")
 
 
 def _market() -> Market:

@@ -87,19 +87,19 @@ def create_app() -> web.Application:
     dispatcher = Dispatcher()
     open_url = _resolve_open_url(config.WEBHOOK_URL)
     dispatcher.include_router(create_start_router(open_url))
-    dispatcher.include_router(create_markets_router(os.getenv("MINI_APP_URL")))
-    dispatcher.include_router(create_betting_router(os.getenv("MINI_APP_URL")))
+    dispatcher.include_router(create_markets_router(open_url))
+    dispatcher.include_router(create_betting_router(open_url))
     dispatcher.include_router(
         create_resolution_router(
             platform_fee_pct=config.PLATFORM_FEE_PCT,
-            mini_app_url=os.getenv("MINI_APP_URL"),
+            mini_app_url=open_url,
         )
     )
     dispatcher.include_router(
         create_fraud_router(
             admin_ids=config.ADMIN_IDS,
             platform_fee_pct=config.PLATFORM_FEE_PCT,
-            mini_app_url=os.getenv("MINI_APP_URL"),
+            mini_app_url=open_url,
         )
     )
     dispatcher.include_router(create_withdrawals_router(config.ADMIN_IDS))

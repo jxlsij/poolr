@@ -21,6 +21,7 @@ from bot.crud import (
     update_user_balance,
 )
 from bot.handlers.markets import build_market_card_text
+from bot.market_cards import update_market_card_photo
 from bot.models import Bet, Market, MarketStatus, Payout
 
 
@@ -545,28 +546,16 @@ async def _update_market_card_best_effort(
     mini_app_url: str | None = None,
 ) -> None:
     del mini_app_url
-
-    if market.inline_message_id:
-        try:
-            await bot.edit_message_text(
-                inline_message_id=market.inline_message_id,
-                text=build_resolved_market_card_text(market, pool_by_option),
-                reply_markup=_build_post_resolution_keyboard(market),
-            )
-        except Exception:
-            logger.exception("Failed to update inline resolved market card: market_id=%d", market.id)
-        return
-
-    if market.message_id is None:
-        logger.info("Skipping resolved market card update without message id: market_id=%d", market.id)
-        return
-
     try:
-        await bot.edit_message_text(
+        await update_market_card_photo(
+            bot,
+            inline_message_id=market.inline_message_id,
             chat_id=market.chat_id,
             message_id=market.message_id,
-            text=build_resolved_market_card_text(market, pool_by_option),
+            market=market,
+            pool_by_option=pool_by_option,
             reply_markup=_build_post_resolution_keyboard(market),
+            fallback_text=build_resolved_market_card_text(market, pool_by_option),
         )
     except Exception:
         logger.exception("Failed to update resolved market card: market_id=%d", market.id)

@@ -45,10 +45,14 @@ async def session_factory():
 class FakeBot:
     def __init__(self) -> None:
         self.edited_messages: list[dict] = []
+        self.edited_media: list[dict] = []
         self.sent_messages: list[dict] = []
 
     async def edit_message_text(self, **kwargs):
         self.edited_messages.append(kwargs)
+
+    async def edit_message_media(self, **kwargs):
+        self.edited_media.append(kwargs)
 
     async def send_message(self, **kwargs):
         self.sent_messages.append(kwargs)
@@ -171,9 +175,10 @@ async def test_handle_resolve_callback_publishes_results(session_factory) -> Non
         await handle_resolve_callback(callback, session, bot, platform_fee_pct=0.08)
 
     assert callback.answers[-1] == {"text": "Market resolved.", "show_alert": False}
-    assert bot.edited_messages[0]["chat_id"] == -100
-    assert bot.edited_messages[0]["message_id"] == 555
-    assert "Resolved: Yes" in bot.edited_messages[0]["text"]
+    assert bot.edited_messages == []
+    assert bot.edited_media[0]["chat_id"] == -100
+    assert bot.edited_media[0]["message_id"] == 555
+    assert bot.edited_media[0]["media"].caption.startswith("Poolr market #")
     assert bot.sent_messages[0]["chat_id"] == -100
     assert "Winning outcome: Yes" in bot.sent_messages[0]["text"]
 
@@ -200,7 +205,7 @@ async def test_auto_cancel_market_refunds_stakes_after_grace_period(session_fact
     assert bettor_two.balance_credits == 30
     assert bettor_three is not None
     assert bettor_three.balance_credits == 40
-    assert "Cancelled: stakes refunded." in bot.edited_messages[0]["text"]
+    assert bot.edited_media[0]["media"].caption.startswith("Poolr market #")
 
 
 def test_build_results_text_uses_stars_language() -> None:
@@ -227,7 +232,7 @@ async def test_publish_resolution_results_skips_group_post_for_inline_market() -
 
     await publish_resolution_results(bot, market, [], {0: 10}, platform_fee=0)
 
-    assert bot.edited_messages[0]["inline_message_id"] == "inline-message-id"
+    assert bot.edited_media[0]["inline_message_id"] == "inline-message-id"
     assert bot.sent_messages == []
 
 

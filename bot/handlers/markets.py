@@ -27,6 +27,10 @@ from bot.crud import (
     update_market_inline_message_id,
     update_market_message_id,
 )
+from bot.market_cards import (
+    send_market_card_photo,
+    update_market_card_photo,
+)
 from bot.models import Market, MarketStatus
 from bot.users import UserModuleError, ensure_user
 
@@ -495,15 +499,18 @@ async def publish_market_card(
 ) -> Message:
     logger.info("Publishing market card: market_id=%d chat_id=%d", market.id, chat_id)
     try:
-        return await bot.send_message(
-            chat_id=chat_id,
-            text=build_market_card_text(market, pool_by_option),
-            reply_markup=build_market_keyboard(
+        return await send_market_card_photo(
+            bot,
+            chat_id,
+            market,
+            pool_by_option,
+            build_market_keyboard(
                 market_id=market.id,
                 options=market.options,
                 status=market.status,
                 mini_app_url=mini_app_url,
             ),
+            fallback_text=build_market_card_text(market, pool_by_option),
         )
     except Exception as exc:
         logger.exception("Failed to publish market card: market_id=%d chat_id=%d", market.id, chat_id)
@@ -525,16 +532,19 @@ async def update_market_card(
         message_id,
     )
     try:
-        await bot.edit_message_text(
+        await update_market_card_photo(
+            bot,
             chat_id=chat_id,
             message_id=message_id,
-            text=build_market_card_text(market, pool_by_option),
+            market=market,
+            pool_by_option=pool_by_option,
             reply_markup=build_market_keyboard(
                 market_id=market.id,
                 options=market.options,
                 status=market.status,
                 mini_app_url=mini_app_url,
             ),
+            fallback_text=build_market_card_text(market, pool_by_option),
         )
     except Exception as exc:
         logger.exception("Failed to update market card: market_id=%d", market.id)
@@ -554,15 +564,18 @@ async def update_inline_market_card(
         bool(inline_message_id),
     )
     try:
-        await bot.edit_message_text(
+        await update_market_card_photo(
+            bot,
             inline_message_id=inline_message_id,
-            text=build_market_card_text(market, pool_by_option),
+            market=market,
+            pool_by_option=pool_by_option,
             reply_markup=build_market_keyboard(
                 market_id=market.id,
                 options=market.options,
                 status=market.status,
                 mini_app_url=mini_app_url,
             ),
+            fallback_text=build_market_card_text(market, pool_by_option),
         )
     except Exception as exc:
         logger.exception("Failed to update inline market card: market_id=%d", market.id)

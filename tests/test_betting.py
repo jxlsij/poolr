@@ -46,9 +46,13 @@ async def session_factory():
 class FakeBot:
     def __init__(self) -> None:
         self.edited_messages: list[dict] = []
+        self.edited_media: list[dict] = []
 
     async def edit_message_text(self, **kwargs):
         self.edited_messages.append(kwargs)
+
+    async def edit_message_media(self, **kwargs):
+        self.edited_media.append(kwargs)
 
 
 class FakePreCheckoutQuery:
@@ -188,9 +192,10 @@ async def test_stake_payment_records_bet_and_updates_market_card(session_factory
     assert deposit.status == DepositStatus.CONFIRMED
     assert bet is not None
     assert bet.option_index == 1
-    assert bot.edited_messages[0]["chat_id"] == -100
-    assert bot.edited_messages[0]["message_id"] == 555
-    assert "Pool: 10 Stars" in bot.edited_messages[0]["text"]
+    assert bot.edited_messages == []
+    assert bot.edited_media[0]["chat_id"] == -100
+    assert bot.edited_media[0]["message_id"] == 555
+    assert bot.edited_media[0]["media"].caption.startswith("Poolr market #")
     assert message.answers == ["Bet placed: 10 Stars."]
 
 

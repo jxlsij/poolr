@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from bot.crud import DatabaseLayerError, get_pool_by_option
 from bot.database import session_scope
 from bot.handlers.markets import build_market_card_text, build_market_keyboard
+from bot.market_cards import update_market_card_photo
 from bot.models import Bet, Market, MarketStatus, NotificationLog, Payout
 from bot.resolution import auto_cancel_market, build_resolution_keyboard
 
@@ -286,7 +287,7 @@ async def notify_market_closed(
     )
     text = build_closed_market_card_text(market, pool_by_option)
 
-    card_updated = await _update_closed_market_card_best_effort(bot, market, text, reply_markup)
+    card_updated = await _update_closed_market_card_best_effort(bot, market, text, reply_markup, pool_by_option)
     creator_notified = await _notify_creator_to_resolve_best_effort(bot, market)
     if not card_updated and not creator_notified:
         raise NotificationProviderError("Failed to publish market closed notification")
@@ -359,23 +360,18 @@ async def _update_closed_market_card(
     market: Market,
     text: str,
     reply_markup: InlineKeyboardMarkup,
+    pool_by_option: dict[int, int],
 ) -> None:
     try:
-        if market.inline_message_id:
-            await bot.edit_message_text(
-                inline_message_id=market.inline_message_id,
-                text=text,
-                reply_markup=reply_markup,
-            )
-            return
-        if market.message_id is None:
-            logger.info("Skipping closed market card update without message id: market_id=%d", market.id)
-            return
-        await bot.edit_message_text(
+        await update_market_card_photo(
+            bot,
+            inline_message_id=market.inline_message_id,
             chat_id=market.chat_id,
             message_id=market.message_id,
-            text=text,
+            market=market,
+            pool_by_option=pool_by_option,
             reply_markup=reply_markup,
+            fallback_text=text,
         )
     except Exception as exc:
         logger.exception("Failed to update closed market card: market_id=%d", market.id)
@@ -387,9 +383,10 @@ async def _update_closed_market_card_best_effort(
     market: Market,
     text: str,
     reply_markup: InlineKeyboardMarkup,
+    pool_by_option: dict[int, int],
 ) -> bool:
     try:
-        await _update_closed_market_card(bot, market, text, reply_markup)
+        await _update_closed_market_card(bot, market, text, reply_markup, pool_by_option)
     except NotificationProviderError:
         logger.warning("Continuing after closed market card update failure: market_id=%d", market.id, exc_info=True)
         return False
