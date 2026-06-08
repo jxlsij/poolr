@@ -853,20 +853,35 @@
     state.busy = "bet";
     render();
     try {
+      const marketId = market.id;
       await apiPost("/api/bet", {
-        market_id: market.id,
+        market_id: marketId,
         option_index: state.selectedOption,
         stars_amount: state.stakeAmount,
       });
       state.selectedMarket = null;
-      showNotice("Stars invoice sent in Telegram.");
-      await loadData();
+      state.busy = "";
+      showNotice("Stars invoice sent. Updating after payment.");
+      void refreshAfterInvoice(marketId);
     } catch (error) {
       showNotice(error.message || "Could not send Stars invoice.");
     } finally {
       state.busy = "";
       render();
     }
+  }
+
+  async function refreshAfterInvoice(marketId) {
+    for (const waitMs of [1500, 3000, 6000]) {
+      await delay(waitMs);
+      await loadData();
+      const hasRecordedBet = state.bets.some((bet) => String(bet.market_id) === String(marketId));
+      if (hasRecordedBet) {
+        showNotice("Bet recorded.");
+        return;
+      }
+    }
+    showNotice("Invoice sent. Tap refresh if the pool still looks old.");
   }
 
   async function requestDeposit() {
@@ -1059,6 +1074,10 @@
       render();
     }, 3600);
     render();
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
   function haptic(style) {
