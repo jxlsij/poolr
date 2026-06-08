@@ -86,20 +86,21 @@ def create_app() -> web.Application:
     bot = create_bot(config.BOT_TOKEN)
     dispatcher = Dispatcher()
     open_url = _resolve_open_url(config.WEBHOOK_URL)
+    market_link_url = _resolve_market_link_url()
     dispatcher.include_router(create_start_router(open_url))
-    dispatcher.include_router(create_markets_router(open_url))
-    dispatcher.include_router(create_betting_router(open_url))
+    dispatcher.include_router(create_markets_router(market_link_url))
+    dispatcher.include_router(create_betting_router(market_link_url))
     dispatcher.include_router(
         create_resolution_router(
             platform_fee_pct=config.PLATFORM_FEE_PCT,
-            mini_app_url=open_url,
+            mini_app_url=market_link_url,
         )
     )
     dispatcher.include_router(
         create_fraud_router(
             admin_ids=config.ADMIN_IDS,
             platform_fee_pct=config.PLATFORM_FEE_PCT,
-            mini_app_url=open_url,
+            mini_app_url=market_link_url,
         )
     )
     dispatcher.include_router(create_withdrawals_router(config.ADMIN_IDS))
@@ -183,6 +184,16 @@ def _webhook_path_from_url(webhook_url: str) -> str:
 
 def _resolve_open_url(webhook_url: str) -> str:
     return os.getenv("MINI_APP_URL") or _app_url_from_webhook(webhook_url)
+
+
+def _resolve_market_link_url() -> str:
+    direct_url = os.getenv("MINI_APP_DIRECT_URL")
+    if direct_url:
+        return direct_url.rstrip("?&")
+
+    bot_username = os.getenv("BOT_USERNAME", "pooolr_bot").lstrip("@")
+    app_short_name = os.getenv("MINI_APP_SHORT_NAME", "poolr").strip("/")
+    return f"https://t.me/{bot_username}/{app_short_name}"
 
 
 def _app_url_from_webhook(webhook_url: str) -> str:

@@ -5,7 +5,7 @@
   const walletKey = "poolr:wallet:v1";
   const params = new URLSearchParams(window.location.search);
   const hasTelegramAuth = Boolean(tg && tg.initData);
-  const targetMarketId = params.get("market_id") || params.get("market");
+  const targetMarketId = resolveTargetMarketId();
   let noticeTimer = null;
 
   const demoMarkets = [
@@ -137,6 +137,28 @@
       return true;
     }
     return safeStorageGet(onboardingKey) !== "done";
+  }
+
+  function resolveTargetMarketId() {
+    return (
+      parseMarketStartParam(params.get("market_id")) ||
+      parseMarketStartParam(params.get("market")) ||
+      parseMarketStartParam(params.get("startapp")) ||
+      parseMarketStartParam(params.get("tgWebAppStartParam")) ||
+      parseMarketStartParam(tg && tg.initDataUnsafe ? tg.initDataUnsafe.start_param : "")
+    );
+  }
+
+  function parseMarketStartParam(value) {
+    const text = String(value || "").trim();
+    if (!text) {
+      return "";
+    }
+    if (/^\d+$/.test(text)) {
+      return text;
+    }
+    const match = text.match(/^market[_-](\d+)$/i);
+    return match ? match[1] : "";
   }
 
   async function loadData() {

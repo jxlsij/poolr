@@ -137,16 +137,18 @@ def test_build_market_card_text_and_keyboard() -> None:
 def test_build_market_keyboard_includes_open_button_when_url_present() -> None:
     market = _market()
 
-    keyboard = build_market_keyboard(market.id, market.options, market.status, mini_app_url="https://example.com/app")
+    keyboard = build_market_keyboard(market.id, market.options, market.status, mini_app_url="https://t.me/pooolr_bot/poolr")
 
     assert keyboard.inline_keyboard[-1][0].text == "Open event"
-    assert keyboard.inline_keyboard[-1][0].url == "https://example.com/app?market_id=123"
+    assert keyboard.inline_keyboard[-1][0].url == "https://t.me/pooolr_bot/poolr?startapp=market_123"
     assert keyboard.inline_keyboard[-1][0].web_app is None
 
 
 def test_build_market_url_appends_market_id() -> None:
     assert build_market_url("https://example.com/app", 123) == "https://example.com/app?market_id=123"
     assert build_market_url("https://example.com/app?start=1", 123) == "https://example.com/app?start=1&market_id=123"
+    assert build_market_url("https://t.me/pooolr_bot/poolr", 123) == "https://t.me/pooolr_bot/poolr?startapp=market_123"
+    assert build_market_url("https://t.me/pooolr_bot/poolr?foo=1", 123) == "https://t.me/pooolr_bot/poolr?foo=1&startapp=market_123"
     assert build_market_url(None, 123) is None
 
 
@@ -160,14 +162,14 @@ def test_render_market_card_image_produces_png() -> None:
 
 
 def test_build_inline_market_result() -> None:
-    result = build_inline_market_result(_market(), {0: 0, 1: 0}, mini_app_url="https://example.com/app")
+    result = build_inline_market_result(_market(), {0: 0, 1: 0}, mini_app_url="https://t.me/pooolr_bot/poolr")
 
     assert result.id == "market:123"
     assert result.title == "Will Max be late?"
     assert result.input_message_content.message_text.startswith("Poolr market #123")
     assert "Min stake: 10 Stars" in result.input_message_content.message_text
     assert result.reply_markup.inline_keyboard[0][0].callback_data == "bet:123:0"
-    assert result.reply_markup.inline_keyboard[-1][0].url == "https://example.com/app?market_id=123"
+    assert result.reply_markup.inline_keyboard[-1][0].url == "https://t.me/pooolr_bot/poolr?startapp=market_123"
     assert result.reply_markup.inline_keyboard[-1][0].web_app is None
 
 
@@ -186,7 +188,7 @@ async def test_handle_inline_market_query_creates_market_and_answers(session_fac
     query = FakeInlineQuery()
 
     async with session_factory() as session:
-        await handle_inline_market_query(query, session, mini_app_url="https://example.com/app")
+        await handle_inline_market_query(query, session, mini_app_url="https://t.me/pooolr_bot/poolr")
 
         active_markets = await get_active_markets_in_chat(session, INLINE_MARKET_CHAT_ID)
 
@@ -200,7 +202,7 @@ async def test_handle_inline_market_query_creates_market_and_answers(session_fac
         f"Poolr market #{active_markets[0].id}"
     )
     assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].url == (
-        f"https://example.com/app?market_id={active_markets[0].id}"
+        f"https://t.me/pooolr_bot/poolr?startapp=market_{active_markets[0].id}"
     )
     assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].web_app is None
 
@@ -280,12 +282,12 @@ async def test_update_inline_market_card_edits_compact_text() -> None:
         "inline-message-id",
         market,
         {0: 5, 1: 5},
-        mini_app_url="https://example.com/app",
+        mini_app_url="https://t.me/pooolr_bot/poolr",
     )
 
     assert bot.edited_messages[0]["inline_message_id"] == "inline-message-id"
     assert bot.edited_messages[0]["text"].startswith("Poolr market #123")
-    assert bot.edited_messages[0]["reply_markup"].inline_keyboard[-1][0].url == "https://example.com/app?market_id=123"
+    assert bot.edited_messages[0]["reply_markup"].inline_keyboard[-1][0].url == "https://t.me/pooolr_bot/poolr?startapp=market_123"
     assert bot.edited_messages[0]["reply_markup"].inline_keyboard[-1][0].web_app is None
 
 

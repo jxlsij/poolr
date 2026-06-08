@@ -272,7 +272,9 @@ after every meaningful architecture, deployment, environment, or module change.
   `chosen_inline_result`: `@pooolr_bot Will Max be late?` returns a compact
   text inline article with default Yes/No options, 2-hour deadline, 1 Star min
   stake, callback data `bet:{market_id}:{option_index}` for Module 7, and an
-  `Open event` deep link to `/app?market_id={market_id}`.
+  `Open event` direct Mini App link like
+  `https://t.me/pooolr_bot/poolr?startapp=market_{market_id}` so Telegram opens
+  the Mini App natively instead of showing the raw `hf.space` URL prompt.
 - `bot/security.py`: Module 2 security functions and `AdminMiddleware`.
 - `bot/handlers/start.py`: `/start` handler and start-message composition; the
   Open button is configured globally in `main.py` through Telegram Bot Menu.
@@ -304,6 +306,11 @@ Required in production:
 Optional:
 
 - `MINI_APP_URL`: Open button URL for `/start`. Falls back to `WEBHOOK_URL`.
+- `MINI_APP_DIRECT_URL`: optional direct Mini App base URL for event buttons,
+  e.g. `https://t.me/pooolr_bot/poolr`; defaults to `BOT_USERNAME` plus
+  `MINI_APP_SHORT_NAME`.
+- `BOT_USERNAME`: defaults to `pooolr_bot` for Mini App direct links.
+- `MINI_APP_SHORT_NAME`: BotFather Mini App short name; defaults to `poolr`.
 - `PLATFORM_FEE_PCT`: defaults to `0.08`. This is provisional; final fee,
   reserve, and withdrawal economics are not decided.
 - `ADMIN_IDS`: comma/space-separated Telegram user IDs.

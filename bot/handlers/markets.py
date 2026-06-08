@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, StateFilter
@@ -471,8 +472,10 @@ def build_inline_market_text(
 def build_market_url(mini_app_url: str | None, market_id: int) -> str | None:
     if not mini_app_url:
         return None
+    parsed = urlparse(mini_app_url)
+    parameter = f"startapp=market_{market_id}" if parsed.netloc.lower() in {"t.me", "telegram.me"} else f"market_id={market_id}"
     separator = "&" if "?" in mini_app_url else "?"
-    return f"{mini_app_url}{separator}market_id={market_id}"
+    return f"{mini_app_url}{separator}{parameter}"
 
 
 def build_market_keyboard(
