@@ -284,7 +284,7 @@ def auth_headers(user_id: int) -> dict[str, str]:
     init_data = build_init_data(
         BOT_TOKEN,
         {
-            "auth_date": "1710000000",
+            "auth_date": _current_auth_date(),
             "user": json.dumps(
                 {"id": user_id, "first_name": "Ada", "username": "ada"},
                 separators=(",", ":"),
@@ -309,3 +309,7 @@ def build_init_data(bot_token: str, values: dict[str, str]) -> str:
         hashlib.sha256,
     ).hexdigest()
     return urlencode({**values, "hash": data_hash}, quote_via=quote)
+
+
+def _current_auth_date() -> str:
+    return str(int(datetime.now(timezone.utc).timestamp()))

@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import logging
+from datetime import datetime, timezone
 from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import parse_qsl
@@ -13,6 +14,9 @@ from aiogram.types import CallbackQuery, Message, TelegramObject
 
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_WEBAPP_INIT_DATA_MAX_AGE_SECONDS = 24 * 60 * 60
+DEFAULT_WEBAPP_INIT_DATA_FUTURE_SKEW_SECONDS = 5 * 60
 
 
 class SecurityValidationError(ValueError):
@@ -42,9 +46,17 @@ def verify_webhook_request(
 def validate_webapp_init_data(
     init_data_raw: str,
     bot_token: str,
+    *,
+    max_age_seconds: int = DEFAULT_WEBAPP_INIT_DATA_MAX_AGE_SECONDS,
+    future_skew_seconds: int = DEFAULT_WEBAPP_INIT_DATA_FUTURE_SKEW_SECONDS,
 ) -> dict[str, Any] | None:
     try:
-        return _validate_webapp_init_data(init_data_raw, bot_token)
+        return _validate_webapp_init_data(
+            init_data_raw,
+            bot_token,
+            max_age_seconds=max_age_seconds,
+            future_skew_seconds=future_skew_seconds,
+        )
     except SecurityValidationError as exc:
         logger.warning("Mini App initData validation failed: %s", exc)
         return None
@@ -56,11 +68,18 @@ def validate_webapp_init_data(
 def _validate_webapp_init_data(
     init_data_raw: str,
     bot_token: str,
+    *,
+    max_age_seconds: int,
+    future_skew_seconds: int,
 ) -> dict[str, Any]:
     if not init_data_raw:
         raise SecurityValidationError("missing initData")
     if not bot_token:
         raise SecurityValidationError("missing bot token")
+    if max_age_seconds < 0:
+        raise SecurityValidationError("max_age_seconds must be non-negative")
+    if future_skew_seconds < 0:
+        raise SecurityValidationError("future_skew_seconds must be non-negative")
 
     try:
         parsed_pairs = parse_qsl(
@@ -107,6 +126,14 @@ def _validate_webapp_init_data(
         raise SecurityValidationError("invalid hash")
 
     init_data = dict(parsed_pairs)
+    auth_date_raw = init_data.get("auth_date")
+    auth_date = _parse_auth_date(auth_date_raw)
+    _validate_auth_date_freshness(
+        auth_date=auth_date,
+        max_age_seconds=max_age_seconds,
+        future_skew_seconds=future_skew_seconds,
+    )
+    init_data["auth_date"] = auth_date_raw
     user_raw = init_data.get("user")
     if user_raw:
         try:
@@ -117,9 +144,36 @@ def _validate_webapp_init_data(
     logger.info(
         "Mini App initData validated: has_user=%s auth_date=%s",
         "user" in init_data,
-        init_data.get("auth_date"),
+        auth_date,
     )
     return init_data
+
+
+def _parse_auth_date(auth_date_raw: Any) -> int:
+    if isinstance(auth_date_raw, bool) or not isinstance(auth_date_raw, str) or not auth_date_raw.strip():
+        raise SecurityValidationError("missing auth_date")
+
+    try:
+        auth_date = int(auth_date_raw.strip())
+    except ValueError as exc:
+        raise SecurityValidationError("invalid auth_date") from exc
+
+    if auth_date < 0:
+        raise SecurityValidationError("invalid auth_date")
+    return auth_date
+
+
+def _validate_auth_date_freshness(
+    *,
+    auth_date: int,
+    max_age_seconds: int,
+    future_skew_seconds: int,
+) -> None:
+    now = int(datetime.now(timezone.utc).timestamp())
+    if auth_date > now + future_skew_seconds:
+        raise SecurityValidationError("auth_date is too far in the future")
+    if now - auth_date > max_age_seconds:
+        raise SecurityValidationError("auth_date is too old")
 
 
 def is_admin(user_id: int, admin_ids: list[int]) -> bool:

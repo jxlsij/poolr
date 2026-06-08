@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 import pytest_asyncio
 from aiogram.types import User as TelegramUser
@@ -65,7 +67,7 @@ async def test_ensure_user_from_webapp_data_creates_user(session_factory) -> Non
         user, is_new = await ensure_user_from_webapp_data(
             session,
             {
-                "auth_date": "1710000000",
+                "auth_date": _current_auth_date(),
                 "user": {
                     "id": 202,
                     "first_name": "Linus",
@@ -84,7 +86,7 @@ async def test_ensure_user_from_webapp_data_creates_user(session_factory) -> Non
 async def test_ensure_user_from_webapp_data_rejects_missing_user(session_factory) -> None:
     async with session_factory() as session:
         with pytest.raises(UserIdentityError):
-            await ensure_user_from_webapp_data(session, {"auth_date": "1710000000"})
+            await ensure_user_from_webapp_data(session, {"auth_date": _current_auth_date()})
 
 
 @pytest.mark.asyncio
@@ -125,6 +127,10 @@ async def test_ensure_user_wraps_persistence_errors(
 
     assert "Failed to persist user identity" in caplog.text
     assert "telegram_id=303" in caplog.text
+
+
+def _current_auth_date() -> str:
+    return str(int(datetime.now(timezone.utc).timestamp()))
 
 
 @pytest.mark.asyncio
