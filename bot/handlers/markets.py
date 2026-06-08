@@ -17,7 +17,6 @@ from aiogram.types import (
     InlineQueryResultArticle,
     InputTextMessageContent,
     Message,
-    WebAppInfo,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -496,7 +495,7 @@ def build_market_keyboard(
 
     market_url = build_market_url(mini_app_url, market_id)
     if market_url:
-        rows.append([InlineKeyboardButton(text="Open event", web_app=WebAppInfo(url=market_url))])
+        rows.append([InlineKeyboardButton(text="Open event", url=market_url)])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

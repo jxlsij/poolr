@@ -140,7 +140,8 @@ def test_build_market_keyboard_includes_open_button_when_url_present() -> None:
     keyboard = build_market_keyboard(market.id, market.options, market.status, mini_app_url="https://example.com/app")
 
     assert keyboard.inline_keyboard[-1][0].text == "Open event"
-    assert keyboard.inline_keyboard[-1][0].web_app.url == "https://example.com/app?market_id=123"
+    assert keyboard.inline_keyboard[-1][0].url == "https://example.com/app?market_id=123"
+    assert keyboard.inline_keyboard[-1][0].web_app is None
 
 
 def test_build_market_url_appends_market_id() -> None:
@@ -166,7 +167,8 @@ def test_build_inline_market_result() -> None:
     assert result.input_message_content.message_text.startswith("Poolr market #123")
     assert "Min stake: 10 Stars" in result.input_message_content.message_text
     assert result.reply_markup.inline_keyboard[0][0].callback_data == "bet:123:0"
-    assert result.reply_markup.inline_keyboard[-1][0].web_app.url == "https://example.com/app?market_id=123"
+    assert result.reply_markup.inline_keyboard[-1][0].url == "https://example.com/app?market_id=123"
+    assert result.reply_markup.inline_keyboard[-1][0].web_app is None
 
 
 def test_build_inline_market_text_is_compact() -> None:
@@ -197,9 +199,10 @@ async def test_handle_inline_market_query_creates_market_and_answers(session_fac
     assert query.answer_kwargs["results"][0].input_message_content.message_text.startswith(
         f"Poolr market #{active_markets[0].id}"
     )
-    assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].web_app.url == (
+    assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].url == (
         f"https://example.com/app?market_id={active_markets[0].id}"
     )
+    assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].web_app is None
 
 
 @pytest.mark.asyncio
@@ -282,7 +285,8 @@ async def test_update_inline_market_card_edits_compact_text() -> None:
 
     assert bot.edited_messages[0]["inline_message_id"] == "inline-message-id"
     assert bot.edited_messages[0]["text"].startswith("Poolr market #123")
-    assert bot.edited_messages[0]["reply_markup"].inline_keyboard[-1][0].web_app.url == "https://example.com/app?market_id=123"
+    assert bot.edited_messages[0]["reply_markup"].inline_keyboard[-1][0].url == "https://example.com/app?market_id=123"
+    assert bot.edited_messages[0]["reply_markup"].inline_keyboard[-1][0].web_app is None
 
 
 def _market() -> Market:
