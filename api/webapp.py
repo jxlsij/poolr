@@ -29,6 +29,7 @@ from bot.crud import (
     get_user_bet_on_market,
 )
 from bot.database import session_scope
+from bot.market_cards import render_market_card_image
 from bot.models import Bet, Deposit, Market, MarketStatus, Payout, User, Withdrawal, WithdrawalStatus
 from bot.payments import PaymentModuleError, PaymentProviderError, PaymentValidationError, send_deposit_invoice
 from bot.security import is_admin, validate_webapp_init_data
@@ -113,6 +114,7 @@ def setup_api_routes(
     app.router.add_get("/api/profile", api_get_profile)
     app.router.add_get("/api/markets", api_get_markets)
     app.router.add_get("/api/market/{market_id}", api_get_market)
+    app.router.add_get("/api/market/{market_id}/card.png", api_get_market_card_png)
     app.router.add_get("/api/chat/{chat_id}/markets", api_get_chat_markets)
     app.router.add_get("/api/bets", api_get_my_bets)
     app.router.add_get("/api/withdrawals", api_get_my_withdrawals)
@@ -121,6 +123,22 @@ def setup_api_routes(
     app.router.add_post("/api/deposit", api_get_deposit_link)
     app.router.add_post("/api/withdraw", api_request_withdrawal)
     logger.info("Mini App API routes registered")
+
+
+async def api_get_market_card_png(request: web.Request) -> web.Response:
+    market_id = parse_positive_int(request.match_info.get("market_id"), "market_id")
+    session_factory = request.app[API_SESSION_FACTORY_KEY]
+    async with session_factory() as session:
+        market = await get_market(session, market_id)
+        if market is None:
+            raise ApiNotFoundError("Market was not found.", code="market_not_found")
+        pool_by_option = await get_pool_by_option(session, market.id)
+
+    return web.Response(
+        body=render_market_card_image(market, pool_by_option),
+        content_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def api_operation(operation_name: str) -> Any:

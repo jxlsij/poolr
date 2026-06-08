@@ -20,6 +20,7 @@ from bot.fraud import create_fraud_router
 from bot.handlers.markets import create_markets_router
 from bot.handlers.start import build_web_app_menu_button, create_start_router
 from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, InfrastructureError, setup_webhook
+from bot.market_cards import resolve_public_base_url
 from bot.middleware.database import DatabaseSessionMiddleware
 from bot.monitoring import BOT_APP_KEY, DB_SESSION_FACTORY_APP_KEY
 from bot.monitoring import health_check as detailed_health_check
@@ -86,9 +87,10 @@ def create_app() -> web.Application:
     bot = create_bot(config.BOT_TOKEN)
     dispatcher = Dispatcher()
     open_url = _resolve_open_url(config.WEBHOOK_URL)
+    public_base_url = resolve_public_base_url(config.WEBHOOK_URL)
     dispatcher.include_router(create_start_router(open_url))
-    dispatcher.include_router(create_markets_router(open_url))
-    dispatcher.include_router(create_betting_router(open_url))
+    dispatcher.include_router(create_markets_router(open_url, public_base_url))
+    dispatcher.include_router(create_betting_router(open_url, public_base_url))
     dispatcher.include_router(
         create_resolution_router(
             platform_fee_pct=config.PLATFORM_FEE_PCT,

@@ -22,6 +22,7 @@ from bot.handlers.markets import (
     parse_options_string,
     publish_market_card,
     update_market_card,
+    update_inline_market_card,
 )
 from bot.market_cards import render_market_card_image
 from bot.models import Base, Market, MarketStatus
@@ -158,12 +159,26 @@ def test_build_inline_market_result() -> None:
     assert result.reply_markup.inline_keyboard[0][0].callback_data == "bet:123:0"
 
 
+def test_build_inline_market_result_uses_photo_when_public_url_is_available() -> None:
+    result = build_inline_market_result(
+        _market(),
+        {0: 0, 1: 0},
+        public_base_url="https://example.com/webhook",
+    )
+
+    assert result.id == "market:123"
+    assert result.photo_url.startswith("https://example.com/api/market/123/card.png")
+    assert result.thumbnail_url == result.photo_url
+    assert result.caption == "Poolr market #123 · OPEN"
+    assert result.reply_markup.inline_keyboard[0][0].callback_data == "bet:123:0"
+
+
 @pytest.mark.asyncio
 async def test_handle_inline_market_query_creates_market_and_answers(session_factory) -> None:
     query = FakeInlineQuery()
 
     async with session_factory() as session:
-        await handle_inline_market_query(query, session)
+        await handle_inline_market_query(query, session, public_base_url="https://example.com")
 
         active_markets = await get_active_markets_in_chat(session, INLINE_MARKET_CHAT_ID)
 
@@ -173,6 +188,9 @@ async def test_handle_inline_market_query_creates_market_and_answers(session_fac
     assert query.answer_kwargs["cache_time"] == 1
     assert query.answer_kwargs["is_personal"] is True
     assert query.answer_kwargs["results"][0].id == f"market:{active_markets[0].id}"
+    assert query.answer_kwargs["results"][0].photo_url.startswith(
+        f"https://example.com/api/market/{active_markets[0].id}/card.png"
+    )
 
 
 @pytest.mark.asyncio
@@ -237,6 +255,24 @@ async def test_update_market_card_edits_message() -> None:
 
     assert bot.edited_media[0]["chat_id"] == -100
     assert bot.edited_media[0]["message_id"] == 555
+    assert bot.edited_media[0]["media"].caption.startswith("Poolr market #123")
+
+
+@pytest.mark.asyncio
+async def test_update_inline_market_card_uses_photo_url() -> None:
+    bot = FakeBot()
+    market = _market()
+
+    await update_inline_market_card(
+        bot,
+        "inline-message-id",
+        market,
+        {0: 5, 1: 5},
+        public_base_url="https://example.com/webhook",
+    )
+
+    assert bot.edited_media[0]["inline_message_id"] == "inline-message-id"
+    assert bot.edited_media[0]["media"].media.startswith("https://example.com/api/market/123/card.png")
     assert bot.edited_media[0]["media"].caption.startswith("Poolr market #123")
 
 

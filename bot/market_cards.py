@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import math
+import os
 from io import BytesIO
 from pathlib import Path
 from datetime import timezone
+from urllib.parse import urlencode, urlparse
 
 from aiogram import Bot
 from aiogram.types import BufferedInputFile, InputMediaPhoto
@@ -67,11 +69,37 @@ def build_market_card_photo(
 def build_market_card_media(
     market: Market,
     pool_by_option: dict[int, int],
+    photo_url: str | None = None,
 ) -> InputMediaPhoto:
     return InputMediaPhoto(
-        media=build_market_card_photo(market, pool_by_option),
+        media=photo_url or build_market_card_photo(market, pool_by_option),
         caption=build_market_card_caption(market),
     )
+
+
+def build_market_card_image_url(
+    public_base_url: str,
+    market: Market,
+    pool_by_option: dict[int, int] | None = None,
+) -> str:
+    version_parts = [market.status.value]
+    if market.winning_option is not None:
+        version_parts.append(str(market.winning_option))
+    if pool_by_option is not None:
+        version_parts.append(str(sum(pool_by_option.values())))
+
+    query = urlencode({"v": "-".join(version_parts)})
+    return f"{public_base_url.rstrip('/')}/api/market/{market.id}/card.png?{query}"
+
+
+def resolve_public_base_url(webhook_url: str | None = None) -> str | None:
+    raw_url = webhook_url or os.getenv("PUBLIC_BASE_URL") or os.getenv("WEBHOOK_URL")
+    if not raw_url:
+        return None
+    parsed = urlparse(raw_url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return parsed._replace(path="", params="", query="", fragment="").geturl()
 
 
 async def send_market_card_photo(
@@ -108,9 +136,14 @@ async def update_market_card_photo(
     chat_id: int | None = None,
     message_id: int | None = None,
     inline_message_id: str | None = None,
+    photo_url: str | None = None,
     fallback_text: str | None = None,
 ) -> None:
-    media = build_market_card_media(market, pool_by_option)
+    if inline_message_id and photo_url is None:
+        public_base_url = resolve_public_base_url()
+        if public_base_url is not None:
+            photo_url = build_market_card_image_url(public_base_url, market, pool_by_option)
+    media = build_market_card_media(market, pool_by_option, photo_url=photo_url)
     try:
         if inline_message_id:
             await bot.edit_message_media(

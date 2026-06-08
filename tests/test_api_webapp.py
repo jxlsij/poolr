@@ -139,6 +139,29 @@ async def test_market_detail_includes_pool_odds_and_my_bet(api_client, session_f
 
 
 @pytest.mark.asyncio
+async def test_market_card_png_is_public(api_client, session_factory) -> None:
+    client, _fake_bot = api_client
+    async with session_scope(session_factory) as session:
+        await create_or_get_user(session, 77, "linus", "Linus")
+        market = await create_market(
+            session,
+            creator_id=77,
+            chat_id=0,
+            question="Will the inline card render?",
+            options=["Yes", "No"],
+            deadline=datetime.now(timezone.utc) + timedelta(hours=2),
+            min_bet=1,
+        )
+
+    response = await client.get(f"/api/market/{market.id}/card.png")
+
+    assert response.status == 200
+    assert response.content_type == "image/png"
+    body = await response.read()
+    assert body.startswith(b"\x89PNG")
+
+
+@pytest.mark.asyncio
 async def test_markets_endpoint_lists_active_markets(api_client, session_factory) -> None:
     client, _fake_bot = api_client
     async with session_scope(session_factory) as session:
