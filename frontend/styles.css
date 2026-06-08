@@ -1058,23 +1058,25 @@ button:disabled {
 
 .onboarding {
   min-height: 100dvh;
-  display: flex;
-  align-items: flex-end;
-  padding: max(22px, var(--safe-top)) 24px calc(26px + var(--safe-bottom));
+  display: grid;
+  place-items: center;
+  padding: max(16px, var(--safe-top)) 24px calc(22px + var(--safe-bottom));
   background:
-    radial-gradient(circle at 50% 43%, rgba(51, 154, 220, 0.7), transparent 8rem),
+    radial-gradient(circle at 50% 35%, rgba(51, 154, 220, 0.56), transparent 9rem),
     linear-gradient(180deg, #6aa8cd 0%, #aeb9c0 74%, #8e99a1 100%);
 }
 
 .onboarding-card {
   position: relative;
   width: 100%;
-  min-height: min(58dvh, 585px);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  min-height: 0;
+  height: min(620px, calc(100dvh - 38px - var(--safe-bottom)));
+  display: grid;
+  grid-template-rows: minmax(174px, 1fr) auto auto auto;
+  align-content: end;
+  gap: 0;
   overflow: hidden;
-  padding: 34px 34px 30px;
+  padding: 26px 30px 28px;
   border-radius: 45px;
   background:
     radial-gradient(circle at 89% 9%, rgba(187, 233, 255, 0.74), transparent 13rem),
@@ -1086,9 +1088,10 @@ button:disabled {
 }
 
 .onboarding-art {
-  position: absolute;
-  inset: 18px 16px auto;
-  height: 54%;
+  position: relative;
+  align-self: end;
+  min-height: 0;
+  margin: 0 -8px 8px;
   display: grid;
   place-items: center;
   z-index: 1;
@@ -1099,9 +1102,9 @@ button:disabled {
 .onboarding-title {
   position: relative;
   z-index: 2;
-  margin: 0 0 30px;
+  margin: 0 0 24px;
   color: var(--navy);
-  font-size: 36px;
+  font-size: clamp(29px, 8.7vw, 36px);
   line-height: 1.12;
   font-weight: 950;
   text-align: center;
@@ -1188,7 +1191,7 @@ button:disabled {
 }
 
 .onboarding-card.slide-1 .onboarding-art {
-  height: 53%;
+  margin-bottom: 6px;
 }
 
 .onboarding-card.slide-1 .onboarding-asset {
@@ -1197,8 +1200,7 @@ button:disabled {
 }
 
 .onboarding-card.slide-2 .onboarding-art {
-  top: 18px;
-  height: 28%;
+  margin-bottom: 12px;
 }
 
 .onboarding-card.slide-2 .onboarding-asset {
@@ -1207,7 +1209,7 @@ button:disabled {
 }
 
 .onboarding-card.slide-2 .onboarding-title {
-  font-size: 32px;
+  font-size: clamp(27px, 7.8vw, 32px);
   margin-bottom: 18px;
 }
 
@@ -1384,17 +1386,57 @@ button:disabled {
   }
 
   .onboarding-card {
-    min-height: min(60dvh, 560px);
-    padding: 28px 26px;
+    height: min(574px, calc(100dvh - 34px - var(--safe-bottom)));
+    padding: 24px 24px 26px;
     border-radius: 38px;
   }
 
   .onboarding-title {
-    font-size: 31px;
+    margin-bottom: 22px;
   }
 
   .onboarding-btn {
     width: 128px;
+  }
+}
+
+@media (max-width: 390px) {
+  .onboarding {
+    padding-inline: 16px;
+  }
+
+  .onboarding-card {
+    grid-template-rows: minmax(158px, 1fr) auto auto auto;
+    height: min(540px, calc(100dvh - 30px - var(--safe-bottom)));
+    padding: 22px 22px 24px;
+    border-radius: 34px;
+  }
+
+  .onboarding-asset {
+    max-height: 210px;
+  }
+
+  .onboarding-card.slide-0 .onboarding-asset {
+    max-height: 200px;
+  }
+
+  .onboarding-bottom {
+    gap: 12px;
+  }
+
+  .dots {
+    gap: 10px;
+  }
+
+  .dot.active {
+    width: 44px;
+  }
+
+  .onboarding-btn {
+    width: 122px;
+    min-height: 62px;
+    border-radius: 24px;
+    font-size: 20px;
   }
 }
 

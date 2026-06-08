@@ -9,7 +9,6 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
-from aiogram.types import MenuButtonWebApp, WebAppInfo
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from api.webapp import API_SESSION_FACTORY_KEY, api_error_middleware, setup_api_routes
@@ -19,7 +18,7 @@ from bot.database import create_engine_and_session_factory, run_sql_migrations
 from bot.betting import create_betting_router
 from bot.fraud import create_fraud_router
 from bot.handlers.markets import create_markets_router
-from bot.handlers.start import create_start_router
+from bot.handlers.start import build_web_app_menu_button, create_start_router
 from bot.infrastructure import DEFAULT_ALLOWED_UPDATES, InfrastructureError, setup_webhook
 from bot.middleware.database import DatabaseSessionMiddleware
 from bot.monitoring import BOT_APP_KEY, DB_SESSION_FACTORY_APP_KEY
@@ -64,10 +63,7 @@ async def on_startup(bot: Bot, webhook_url: str, webhook_secret: str, open_url: 
 
 async def setup_web_app_menu_button(bot: Bot, open_url: str) -> None:
     await bot.set_chat_menu_button(
-        menu_button=MenuButtonWebApp(
-            text="Open",
-            web_app=WebAppInfo(url=open_url),
-        )
+        menu_button=build_web_app_menu_button(open_url)
     )
     logger.info("Telegram Web App menu button configured")
 
@@ -90,7 +86,7 @@ def create_app() -> web.Application:
     bot = create_bot(config.BOT_TOKEN)
     dispatcher = Dispatcher()
     open_url = _resolve_open_url(config.WEBHOOK_URL)
-    dispatcher.include_router(create_start_router())
+    dispatcher.include_router(create_start_router(open_url))
     dispatcher.include_router(create_markets_router(os.getenv("MINI_APP_URL")))
     dispatcher.include_router(create_betting_router(os.getenv("MINI_APP_URL")))
     dispatcher.include_router(

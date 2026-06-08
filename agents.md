@@ -100,15 +100,17 @@ after every meaningful architecture, deployment, environment, or module change.
     Face, payment anomaly scanning helpers, typed aiohttp app keys for
     monitoring state, operation logging, and tests.
   - User-facing `/start` route: sends `bot/assets/start_message.png` with
-    emoji-free Markdown caption, removes any stale reply keyboard from older
-    versions, and no longer adds a per-message button; startup configures the
-    native Telegram Bot Menu Web App `Open` button, and `/start` silently
-    ensures the Telegram user when a database session is available.
+    emoji-free Markdown caption, adds an explicit inline `Open Mini App` Web App
+    button, re-applies the per-chat native Telegram Bot Menu Web App `Open`
+    button as a fallback when `/start` is used, and silently ensures the
+    Telegram user when a database session is available. Startup still configures
+    the global native Telegram Bot Menu Web App `Open` button.
   - Mini App frontend shell: a vanilla HTML/CSS/JS app under `frontend/`
     served at `/app`, with Telegram WebApp bootstrap, first-entry onboarding
     disclaimers, live markets/activity/wallet views, Stars bet and deposit
     actions, manual payout request UI, generated Telegram-style PNG sticker
-    assets, and a `/api/markets` feed for the main screen.
+    assets, iPhone-mini-safe onboarding layout, and a `/api/markets` feed for
+    the main screen.
 
 ## Product Direction
 
@@ -421,6 +423,11 @@ notification and expiry-worker foundation.
   - `frontend/` Mini App shell implementation added on 2026-06-08; local
     compile/test/browser verification passed after generated PNG onboarding
     asset integration.
+  - `.venv/bin/python -m compileall api bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 120 tests on 2026-06-08 after
+    restoring robust Mini App entry buttons and tightening iPhone mini
+    onboarding layout (same pytest-asyncio warnings). Browser checks passed for
+    onboarding at 375x812, 375x680, and 375x620.
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:
@@ -431,7 +438,9 @@ notification and expiry-worker foundation.
 
 ## Open Questions
 
-- Mini App frontend is not built yet; set `MINI_APP_URL` when it exists.
+- Mini App frontend shell exists and is served at `/app`; production polish,
+  full real-data UX validation, and richer admin/operator screens are still
+  needed.
 - The exact fee model, reserve policy, withdrawal minimum, payout batching
   cadence, and TON conversion/spread rules are not finalized.
 - Rounding rules for payout distribution are not finalized.
