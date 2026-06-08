@@ -5,6 +5,7 @@
   const walletKey = "poolr:wallet:v1";
   const params = new URLSearchParams(window.location.search);
   const hasTelegramAuth = Boolean(tg && tg.initData);
+  const targetMarketId = params.get("market_id") || params.get("market");
   let noticeTimer = null;
 
   const demoMarkets = [
@@ -129,6 +130,9 @@
   }
 
   function shouldShowOnboarding() {
+    if (targetMarketId) {
+      return false;
+    }
     if (params.get("onboarding") === "1") {
       return true;
     }
@@ -140,6 +144,7 @@
       state.loading = false;
       state.ready = true;
       state.usingDemo = true;
+      await openTargetMarketFromParams();
       render();
       return;
     }
@@ -155,6 +160,7 @@
       state.markets = Array.isArray(marketFeed.markets) ? marketFeed.markets : [];
       state.bets = Array.isArray(betsFeed.bets) ? betsFeed.bets : [];
       state.withdrawals = Array.isArray(withdrawalsFeed.withdrawals) ? withdrawalsFeed.withdrawals : [];
+      await openTargetMarketFromParams();
       state.usingDemo = false;
     } catch (error) {
       console.warn("Mini App API fallback enabled", error);
@@ -165,6 +171,33 @@
       state.ready = true;
       render();
     }
+  }
+
+  async function openTargetMarketFromParams() {
+    if (!targetMarketId) {
+      return;
+    }
+
+    let market = state.markets.find((candidate) => String(candidate.id) === String(targetMarketId));
+    if (!market && hasTelegramAuth) {
+      try {
+        market = await apiGet(`/api/market/${encodeURIComponent(targetMarketId)}`);
+        state.markets = [market, ...state.markets.filter((candidate) => String(candidate.id) !== String(market.id))];
+      } catch (error) {
+        console.warn("Could not open linked market", error);
+        showNotice("Could not open this market.");
+        return;
+      }
+    }
+    if (!market) {
+      return;
+    }
+
+    state.view = "markets";
+    state.filter = "all";
+    state.selectedMarket = market;
+    state.selectedOption = 0;
+    state.stakeAmount = Math.max(Number(market.min_bet || 1), state.stakeAmount || 1);
   }
 
   async function apiGet(path) {

@@ -15,6 +15,8 @@ from bot.handlers.markets import (
     MarketCreationPersistenceError,
     build_market_card_text,
     build_inline_market_result,
+    build_inline_market_text,
+    build_market_url,
     build_market_keyboard,
     handle_chosen_inline_market,
     handle_inline_market_query,
@@ -137,8 +139,14 @@ def test_build_market_keyboard_includes_open_button_when_url_present() -> None:
 
     keyboard = build_market_keyboard(market.id, market.options, market.status, mini_app_url="https://example.com/app")
 
-    assert keyboard.inline_keyboard[-1][0].text == "Open"
-    assert keyboard.inline_keyboard[-1][0].url == "https://example.com/app"
+    assert keyboard.inline_keyboard[-1][0].text == "Open event"
+    assert keyboard.inline_keyboard[-1][0].web_app.url == "https://example.com/app?market_id=123"
+
+
+def test_build_market_url_appends_market_id() -> None:
+    assert build_market_url("https://example.com/app", 123) == "https://example.com/app?market_id=123"
+    assert build_market_url("https://example.com/app?start=1", 123) == "https://example.com/app?start=1&market_id=123"
+    assert build_market_url(None, 123) is None
 
 
 def test_render_market_card_image_produces_png() -> None:
@@ -151,26 +159,24 @@ def test_render_market_card_image_produces_png() -> None:
 
 
 def test_build_inline_market_result() -> None:
-    result = build_inline_market_result(_market(), {0: 0, 1: 0})
+    result = build_inline_market_result(_market(), {0: 0, 1: 0}, mini_app_url="https://example.com/app")
 
     assert result.id == "market:123"
     assert result.title == "Will Max be late?"
     assert result.input_message_content.message_text.startswith("Poolr market #123")
+    assert "Min stake: 10 Stars" in result.input_message_content.message_text
     assert result.reply_markup.inline_keyboard[0][0].callback_data == "bet:123:0"
+    assert result.reply_markup.inline_keyboard[-1][0].web_app.url == "https://example.com/app?market_id=123"
 
 
-def test_build_inline_market_result_uses_photo_when_public_url_is_available() -> None:
-    result = build_inline_market_result(
-        _market(),
-        {0: 0, 1: 0},
-        public_base_url="https://example.com/webhook",
-    )
+def test_build_inline_market_text_is_compact() -> None:
+    text = build_inline_market_text(_market(), {0: 25, 1: 75})
 
-    assert result.id == "market:123"
-    assert result.photo_url.startswith("https://example.com/api/market/123/card.png")
-    assert result.thumbnail_url == result.photo_url
-    assert result.caption == "Poolr market #123 · OPEN"
-    assert result.reply_markup.inline_keyboard[0][0].callback_data == "bet:123:0"
+    assert "Poolr market #123" in text
+    assert "Will Max be late?" in text
+    assert "Pool: 100 Stars" in text
+    assert "Yes: 25 Stars (25%)" in text
+    assert "No: 75 Stars (75%)" in text
 
 
 @pytest.mark.asyncio
@@ -178,7 +184,7 @@ async def test_handle_inline_market_query_creates_market_and_answers(session_fac
     query = FakeInlineQuery()
 
     async with session_factory() as session:
-        await handle_inline_market_query(query, session, public_base_url="https://example.com")
+        await handle_inline_market_query(query, session, mini_app_url="https://example.com/app")
 
         active_markets = await get_active_markets_in_chat(session, INLINE_MARKET_CHAT_ID)
 
@@ -188,8 +194,11 @@ async def test_handle_inline_market_query_creates_market_and_answers(session_fac
     assert query.answer_kwargs["cache_time"] == 1
     assert query.answer_kwargs["is_personal"] is True
     assert query.answer_kwargs["results"][0].id == f"market:{active_markets[0].id}"
-    assert query.answer_kwargs["results"][0].photo_url.startswith(
-        f"https://example.com/api/market/{active_markets[0].id}/card.png"
+    assert query.answer_kwargs["results"][0].input_message_content.message_text.startswith(
+        f"Poolr market #{active_markets[0].id}"
+    )
+    assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].web_app.url == (
+        f"https://example.com/app?market_id={active_markets[0].id}"
     )
 
 
@@ -259,7 +268,7 @@ async def test_update_market_card_edits_message() -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_inline_market_card_uses_photo_url() -> None:
+async def test_update_inline_market_card_edits_compact_text() -> None:
     bot = FakeBot()
     market = _market()
 
@@ -268,12 +277,12 @@ async def test_update_inline_market_card_uses_photo_url() -> None:
         "inline-message-id",
         market,
         {0: 5, 1: 5},
-        public_base_url="https://example.com/webhook",
+        mini_app_url="https://example.com/app",
     )
 
-    assert bot.edited_media[0]["inline_message_id"] == "inline-message-id"
-    assert bot.edited_media[0]["media"].media.startswith("https://example.com/api/market/123/card.png")
-    assert bot.edited_media[0]["media"].caption.startswith("Poolr market #123")
+    assert bot.edited_messages[0]["inline_message_id"] == "inline-message-id"
+    assert bot.edited_messages[0]["text"].startswith("Poolr market #123")
+    assert bot.edited_messages[0]["reply_markup"].inline_keyboard[-1][0].web_app.url == "https://example.com/app?market_id=123"
 
 
 def _market() -> Market:

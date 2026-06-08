@@ -75,10 +75,7 @@ class BettingStates(StatesGroup):
     waiting_amount = State()
 
 
-def create_betting_router(
-    mini_app_url: str | None = None,
-    public_base_url: str | None = None,
-) -> Router:
+def create_betting_router(mini_app_url: str | None = None) -> Router:
     router = Router(name="betting")
 
     @router.callback_query(F.data.startswith(f"{BET_CALLBACK_PREFIX}:"))
@@ -102,7 +99,6 @@ def create_betting_router(
             state=state,
             bot=bot,
             mini_app_url=mini_app_url,
-            public_base_url=public_base_url,
         )
 
     return router
@@ -145,7 +141,6 @@ async def handle_bet_amount_message(
     state: FSMContext,
     bot: Bot,
     mini_app_url: str | None = None,
-    public_base_url: str | None = None,
 ) -> None:
     if message.from_user is None:
         await message.answer("Could not identify you for this bet.")
@@ -499,7 +494,6 @@ async def update_market_card_for_bet(
     market: Market,
     pool_by_option: dict[int, int],
     mini_app_url: str | None = None,
-    public_base_url: str | None = None,
 ) -> None:
     if market.inline_message_id:
         await update_inline_market_card(
@@ -508,7 +502,6 @@ async def update_market_card_for_bet(
             market=market,
             pool_by_option=pool_by_option,
             mini_app_url=mini_app_url,
-            public_base_url=public_base_url,
         )
         return
 

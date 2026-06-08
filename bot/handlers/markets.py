@@ -15,9 +15,9 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineQuery,
     InlineQueryResultArticle,
-    InlineQueryResultPhoto,
     InputTextMessageContent,
     Message,
+    WebAppInfo,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,13 +28,7 @@ from bot.crud import (
     update_market_inline_message_id,
     update_market_message_id,
 )
-from bot.market_cards import (
-    build_market_card_caption,
-    build_market_card_image_url,
-    resolve_public_base_url,
-    send_market_card_photo,
-    update_market_card_photo,
-)
+from bot.market_cards import send_market_card_photo, update_market_card_photo
 from bot.models import Market, MarketStatus
 from bot.users import UserModuleError, ensure_user
 
@@ -70,10 +64,7 @@ class MarketCreationStates(StatesGroup):
     confirm = State()
 
 
-def create_markets_router(
-    mini_app_url: str | None = None,
-    public_base_url: str | None = None,
-) -> Router:
+def create_markets_router(mini_app_url: str | None = None) -> Router:
     router = Router(name="markets")
 
     @router.message(Command("bet", ignore_mention=True))
@@ -93,7 +84,7 @@ def create_markets_router(
         query: InlineQuery,
         db_session: AsyncSession,
     ) -> None:
-        await handle_inline_market_query(query, db_session, mini_app_url, public_base_url)
+        await handle_inline_market_query(query, db_session, mini_app_url)
 
     @router.chosen_inline_result()
     async def chosen_inline_market_handler(
@@ -194,7 +185,6 @@ async def handle_inline_market_query(
     query: InlineQuery,
     session: AsyncSession,
     mini_app_url: str | None = None,
-    public_base_url: str | None = None,
 ) -> None:
     question = query.query.strip()
     logger.info(
@@ -232,7 +222,6 @@ async def handle_inline_market_query(
             market=market,
             pool_by_option=pool_by_option,
             mini_app_url=mini_app_url,
-            public_base_url=public_base_url,
         )
     except (MarketCreationValidationError, UserModuleError, DatabaseLayerError) as exc:
         logger.exception(
@@ -454,6 +443,39 @@ def build_market_card_text(
     return "\n".join(lines)
 
 
+def build_inline_market_text(
+    market: Market,
+    pool_by_option: dict[int, int],
+) -> str:
+    total_pool = sum(pool_by_option.values())
+    deadline = _format_deadline(market.deadline)
+    option_lines = []
+    for index, option in enumerate(market.options):
+        option_pool = pool_by_option.get(index, 0)
+        pct = int(round((option_pool / total_pool) * 100)) if total_pool else 0
+        option_lines.append(f"{option}: {option_pool} Stars ({pct}%)")
+
+    lines = [
+        f"Poolr market #{market.id}",
+        "",
+        market.question,
+        "",
+        f"Pool: {total_pool} Stars",
+        f"Min stake: {market.min_bet} Stars",
+        f"Deadline: {deadline}",
+    ]
+    if option_lines:
+        lines.extend(["", *option_lines])
+    return "\n".join(lines)
+
+
+def build_market_url(mini_app_url: str | None, market_id: int) -> str | None:
+    if not mini_app_url:
+        return None
+    separator = "&" if "?" in mini_app_url else "?"
+    return f"{mini_app_url}{separator}market_id={market_id}"
+
+
 def build_market_keyboard(
     market_id: int,
     options: list[str],
@@ -472,8 +494,9 @@ def build_market_keyboard(
                 ]
             )
 
-    if mini_app_url:
-        rows.append([InlineKeyboardButton(text="Open", url=mini_app_url)])
+    market_url = build_market_url(mini_app_url, market_id)
+    if market_url:
+        rows.append([InlineKeyboardButton(text="Open event", web_app=WebAppInfo(url=market_url))])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -482,34 +505,13 @@ def build_inline_market_result(
     market: Market,
     pool_by_option: dict[int, int],
     mini_app_url: str | None = None,
-    public_base_url: str | None = None,
-) -> InlineQueryResultArticle | InlineQueryResultPhoto:
-    public_base_url = resolve_public_base_url(public_base_url)
-    if public_base_url:
-        photo_url = build_market_card_image_url(public_base_url, market, pool_by_option)
-        return InlineQueryResultPhoto(
-            id=f"market:{market.id}",
-            photo_url=photo_url,
-            thumbnail_url=photo_url,
-            photo_width=1200,
-            photo_height=960,
-            title=market.question,
-            description=f"Yes/No market, min {market.min_bet} Star",
-            caption=build_market_card_caption(market),
-            reply_markup=build_market_keyboard(
-                market_id=market.id,
-                options=market.options,
-                status=market.status,
-                mini_app_url=mini_app_url,
-            ),
-        )
-
+) -> InlineQueryResultArticle:
     return InlineQueryResultArticle(
         id=f"market:{market.id}",
         title=market.question,
         description=f"Yes/No market, min {market.min_bet} Star",
         input_message_content=InputTextMessageContent(
-            message_text=build_market_card_text(market, pool_by_option),
+            message_text=build_inline_market_text(market, pool_by_option),
         ),
         reply_markup=build_market_keyboard(
             market_id=market.id,
@@ -587,32 +589,22 @@ async def update_inline_market_card(
     market: Market,
     pool_by_option: dict[int, int],
     mini_app_url: str | None = None,
-    public_base_url: str | None = None,
 ) -> None:
     logger.info(
         "Updating inline market card: market_id=%d inline_message_id_set=%s",
         market.id,
         bool(inline_message_id),
     )
-    public_base_url = resolve_public_base_url(public_base_url)
     try:
-        await update_market_card_photo(
-            bot,
+        await bot.edit_message_text(
             inline_message_id=inline_message_id,
-            market=market,
-            pool_by_option=pool_by_option,
+            text=build_inline_market_text(market, pool_by_option),
             reply_markup=build_market_keyboard(
                 market_id=market.id,
                 options=market.options,
                 status=market.status,
                 mini_app_url=mini_app_url,
             ),
-            photo_url=(
-                build_market_card_image_url(public_base_url, market, pool_by_option)
-                if public_base_url
-                else None
-            ),
-            fallback_text=build_market_card_text(market, pool_by_option),
         )
     except Exception as exc:
         logger.exception("Failed to update inline market card: market_id=%d", market.id)

@@ -199,13 +199,11 @@ after every meaningful architecture, deployment, environment, or module change.
 - `api/webapp.py`: Module 12 Mini App backend API. Registers `/api/profile`,
   `/api/markets`, `/api/market/{market_id}`, `/api/chat/{chat_id}/markets`,
   `/api/bets`, `/api/withdrawals`, `/api/admin/overview`, `/api/bet`,
-  `/api/deposit`, and `/api/withdraw`; also exposes public
-  `/api/market/{market_id}/card.png` images for Telegram inline photo results.
-  It validates Mini App `initData`, ensures users implicitly, serializes
-  markets/bets/withdrawals, sends Stars invoices, and creates manual
-  TON-equivalent payout requests. It logs request durations and operation
-  lifecycle, returns stable JSON error codes, and separates validation,
-  persistence, and Telegram provider failures.
+  `/api/deposit`, and `/api/withdraw`; validates Mini App `initData`, ensures
+  users implicitly, serializes markets/bets/withdrawals, sends Stars invoices,
+  and creates manual TON-equivalent payout requests. It logs request durations
+  and operation lifecycle, returns stable JSON error codes, and separates
+  validation, persistence, and Telegram provider failures.
 - `bot/config.py`: `Config`, `.env`/environment loading, config validation,
   redacted config logging.
 - `bot/admin.py`: Module 13 admin operations. Provides admin-only stats,
@@ -271,11 +269,10 @@ after every meaningful architecture, deployment, environment, or module change.
   late?` skips directly to options. Mention syntax like `@pooolr_bot Will Max
   be late?` also starts creation when Telegram routes the mention to the bot.
   Telegram Inline Mode is implemented through `inline_query` and
-  `chosen_inline_result`: `@pooolr_bot Will Max be late?` returns an inline
-  photo result backed by the public market card PNG endpoint, with default
-  Yes/No options, 2-hour deadline, 1 Star min stake, and callback data
-  `bet:{market_id}:{option_index}` for Module 7. If no public base URL can be
-  resolved, the code falls back to a text article.
+  `chosen_inline_result`: `@pooolr_bot Will Max be late?` returns a compact
+  text inline article with default Yes/No options, 2-hour deadline, 1 Star min
+  stake, callback data `bet:{market_id}:{option_index}` for Module 7, and an
+  `Open event` deep link to `/app?market_id={market_id}`.
 - `bot/security.py`: Module 2 security functions and `AdminMiddleware`.
 - `bot/handlers/start.py`: `/start` handler and start-message composition; the
   Open button is configured globally in `main.py` through Telegram Bot Menu.
