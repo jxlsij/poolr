@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from api.webapp import API_SESSION_FACTORY_KEY, api_error_middleware, setup_api_routes
 from bot.crud import create_bet, create_market, create_or_get_user, create_payout, update_user_balance
 from bot.database import create_all_tables, create_session_factory, session_scope
-from bot.models import Base
+from bot.models import Base, MarketStatus
 
 
 BOT_TOKEN = "123456:test-token"
@@ -136,6 +136,39 @@ async def test_market_detail_includes_pool_odds_and_my_bet(api_client, session_f
     assert body["odds"] == {"0": 0.25, "1": 0.75}
     assert body["total_pool"] == 40
     assert body["my_bet"]["stars_amount"] == 10
+
+
+@pytest.mark.asyncio
+async def test_markets_endpoint_lists_active_markets(api_client, session_factory) -> None:
+    client, _fake_bot = api_client
+    async with session_scope(session_factory) as session:
+        await create_or_get_user(session, 42, "ada", "Ada")
+        active_market = await create_market(
+            session,
+            creator_id=42,
+            chat_id=-100,
+            question="Will Poolr launch today?",
+            options=["Yes", "No"],
+            deadline=datetime.now(timezone.utc) + timedelta(hours=2),
+            min_bet=5,
+        )
+        resolved_market = await create_market(
+            session,
+            creator_id=42,
+            chat_id=-100,
+            question="Did the demo pass?",
+            options=["Yes", "No"],
+            deadline=datetime.now(timezone.utc) + timedelta(hours=2),
+            min_bet=5,
+        )
+        resolved_market.status = MarketStatus.RESOLVED
+
+    response = await client.get("/api/markets", headers=auth_headers(42))
+
+    assert response.status == 200
+    body = await response.json()
+    assert body["status"] == "active"
+    assert [market["id"] for market in body["markets"]] == [active_market.id]
 
 
 @pytest.mark.asyncio

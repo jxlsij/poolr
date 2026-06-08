@@ -104,6 +104,11 @@ after every meaningful architecture, deployment, environment, or module change.
     versions, and no longer adds a per-message button; startup configures the
     native Telegram Bot Menu Web App `Open` button, and `/start` silently
     ensures the Telegram user when a database session is available.
+  - Mini App frontend shell: a vanilla HTML/CSS/JS app under `frontend/`
+    served at `/app`, with Telegram WebApp bootstrap, first-entry onboarding
+    disclaimers, live markets/activity/wallet views, Stars bet and deposit
+    actions, manual payout request UI, generated Telegram-style PNG sticker
+    assets, and a `/api/markets` feed for the main screen.
 
 ## Product Direction
 
@@ -183,16 +188,17 @@ after every meaningful architecture, deployment, environment, or module change.
 ## Project Layout
 
 - `main.py`: aiohttp app entrypoint, health-check, Mini App API mounting,
-  aiogram webhook mounting, webhook registration, native Telegram Bot Menu Web
-  App button setup, custom Telegram API endpoint support.
+  static Mini App frontend mounting at `/app`, aiogram webhook mounting,
+  webhook registration, native Telegram Bot Menu Web App button setup, custom
+  Telegram API endpoint support.
 - `api/webapp.py`: Module 12 Mini App backend API. Registers `/api/profile`,
-  `/api/market/{market_id}`, `/api/chat/{chat_id}/markets`, `/api/bets`,
-  `/api/withdrawals`, `/api/admin/overview`, `/api/bet`, `/api/deposit`, and
-  `/api/withdraw`; validates Mini App `initData`, ensures users implicitly,
-  serializes markets/bets/withdrawals, sends Stars invoices, and creates manual
-  TON-equivalent payout requests. It logs request durations and operation
-  lifecycle, returns stable JSON error codes, and separates validation,
-  persistence, and Telegram provider failures.
+  `/api/markets`, `/api/market/{market_id}`, `/api/chat/{chat_id}/markets`,
+  `/api/bets`, `/api/withdrawals`, `/api/admin/overview`, `/api/bet`,
+  `/api/deposit`, and `/api/withdraw`; validates Mini App `initData`, ensures
+  users implicitly, serializes markets/bets/withdrawals, sends Stars invoices,
+  and creates manual TON-equivalent payout requests. It logs request durations
+  and operation lifecycle, returns stable JSON error codes, and separates
+  validation, persistence, and Telegram provider failures.
 - `bot/config.py`: `Config`, `.env`/environment loading, config validation,
   redacted config logging.
 - `bot/admin.py`: Module 13 admin operations. Provides admin-only stats,
@@ -267,7 +273,7 @@ after every meaningful architecture, deployment, environment, or module change.
   Open button is configured globally in `main.py` through Telegram Bot Menu.
 - `bot/assets/start_message.png`: image sent by `/start`.
 - `api/`: Mini App backend endpoints.
-- `frontend/`: reserved for React/Tailwind Mini App.
+- `frontend/`: vanilla Mini App frontend shell and assets served at `/app`.
 - `migrations/`: SQL migrations, currently
   `0001_module3_database_layer.sql` for the Module 3 schema and
   `0002_inline_mode_markets.sql` for `markets.inline_message_id`, and
@@ -412,6 +418,9 @@ notification and expiry-worker foundation.
     `.venv/bin/python -m pytest -q` passed with 112 tests on 2026-06-08 after
     Module 13 admin operations and Module 14 deployment/monitoring hardening
     (same pytest-asyncio warnings).
+  - `frontend/` Mini App shell implementation added on 2026-06-08; local
+    compile/test/browser verification passed after generated PNG onboarding
+    asset integration.
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:

@@ -111,6 +111,7 @@ def setup_api_routes(
     app[API_PLATFORM_FEE_PCT_KEY] = platform_fee_pct
 
     app.router.add_get("/api/profile", api_get_profile)
+    app.router.add_get("/api/markets", api_get_markets)
     app.router.add_get("/api/market/{market_id}", api_get_market)
     app.router.add_get("/api/chat/{chat_id}/markets", api_get_chat_markets)
     app.router.add_get("/api/bets", api_get_my_bets)
@@ -177,6 +178,30 @@ async def api_get_profile(request: web.Request) -> web.Response:
                 "first_name": ctx.user.first_name,
                 "balance": ctx.user.balance_credits,
                 "stats": stats,
+            }
+        )
+
+
+@api_operation("get_markets")
+async def api_get_markets(request: web.Request) -> web.Response:
+    limit = parse_limit(request.query.get("limit"))
+    offset = parse_offset(request.query.get("offset"))
+    status_filter = parse_market_status_filter(request.query.get("status"))
+    async with api_context(request) as ctx:
+        stmt = select(Market)
+        if status_filter is not None:
+            stmt = stmt.where(Market.status == status_filter)
+        stmt = stmt.order_by(Market.created_at.desc(), Market.id.desc()).limit(limit).offset(offset)
+        markets = list((await ctx.session.scalars(stmt)).all())
+        return json_ok(
+            {
+                "markets": [
+                    await serialize_market_summary(ctx.session, market, ctx.user.telegram_id)
+                    for market in markets
+                ],
+                "limit": limit,
+                "offset": offset,
+                "status": status_filter.value if status_filter is not None else "all",
             }
         )
 
@@ -729,6 +754,18 @@ def parse_offset(value: str | None) -> int:
     if value is None:
         return 0
     return parse_non_negative_int(value, "offset")
+
+
+def parse_market_status_filter(value: str | None) -> MarketStatus | None:
+    if value is None or value.strip().lower() == "active":
+        return MarketStatus.ACTIVE
+    normalized = value.strip().lower()
+    if normalized == "all":
+        return None
+    for status in MarketStatus:
+        if status.value == normalized:
+            return status
+    raise ApiValidationError("status must be active, closed, resolved, cancelled, disputed, or all.")
 
 
 def parse_positive_int(value: Any, name: str) -> int:

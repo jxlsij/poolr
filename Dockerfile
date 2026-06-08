@@ -11,10 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot ./bot
 COPY api ./api
+COPY frontend ./frontend
 COPY migrations ./migrations
 COPY main.py .
 
 EXPOSE 7860
 
 CMD ["python", "main.py"]
-

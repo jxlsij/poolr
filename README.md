@@ -10,12 +10,10 @@ pinned: false
 
 # Poolr
 
-Telegram Stars prediction-market MVP.
+Telegram Stars prediction-market MVP with a built-in Mini App frontend.
 
-The implementation currently contains Module 1 from
-`prediction_market_mvp_plan.md`: configuration loading, webhook setup, async
-database engine creation, local PostgreSQL compose config, and Hugging Face
-Docker scaffolding.
+The implementation currently includes the bot/backend foundations plus a
+vanilla Mini App frontend mounted at `/app` for the Telegram WebApp flow.
 
 ## Local Setup
 
@@ -42,4 +40,4 @@ webhook handler when environment variables are present. Full bot routes will be
 implemented in later modules.
 
 Set `MINI_APP_URL` to control where the `/start` message's Open button points.
-If it is not set, the button falls back to `WEBHOOK_URL`.
+If it is not set, the button falls back to `WEBHOOK_URL` with `/app` appended.

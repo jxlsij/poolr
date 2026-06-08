@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
 from aiohttp import web
@@ -31,11 +32,20 @@ from bot.withdrawals import create_withdrawals_router
 
 
 logger = logging.getLogger(__name__)
+FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
+FRONTEND_INDEX = FRONTEND_DIR / "index.html"
 
 
 async def health_check(request: web.Request) -> web.Response:
     logger.info("Health ping received from %s", request.remote)
     return web.Response(text="OK")
+
+
+async def frontend_index(request: web.Request) -> web.StreamResponse:
+    if not FRONTEND_INDEX.exists():
+        logger.warning("Mini App frontend index is missing: path=%s", FRONTEND_INDEX)
+        raise web.HTTPNotFound(text="Mini App frontend is not built.")
+    return web.FileResponse(FRONTEND_INDEX)
 
 
 async def on_startup(bot: Bot, webhook_url: str, webhook_secret: str, open_url: str) -> None:
@@ -130,6 +140,7 @@ def create_app() -> web.Application:
     app[BOT_APP_KEY] = bot
     app.router.add_get("/", health_check)
     app.router.add_get("/health", detailed_health_check)
+    setup_frontend_routes(app)
     app.on_cleanup.append(cleanup_database)
     setup_api_routes(
         app,
@@ -175,7 +186,23 @@ def _webhook_path_from_url(webhook_url: str) -> str:
 
 
 def _resolve_open_url(webhook_url: str) -> str:
-    return os.getenv("MINI_APP_URL") or webhook_url
+    return os.getenv("MINI_APP_URL") or _app_url_from_webhook(webhook_url)
+
+
+def _app_url_from_webhook(webhook_url: str) -> str:
+    parsed = urlparse(webhook_url)
+    return parsed._replace(path="/app", params="", query="", fragment="").geturl()
+
+
+def setup_frontend_routes(app: web.Application) -> None:
+    if not FRONTEND_INDEX.exists():
+        logger.warning("Mini App frontend files are missing: dir=%s", FRONTEND_DIR)
+        return
+
+    app.router.add_get("/app", frontend_index)
+    app.router.add_get("/app/", frontend_index)
+    app.router.add_static("/app/static", FRONTEND_DIR, show_index=False)
+    logger.info("Mini App frontend routes registered at /app")
 
 
 def _notification_interval_seconds() -> int:
@@ -203,6 +230,7 @@ def main() -> None:
         logger.warning("Config is incomplete: %s", exc)
         app = web.Application()
         app.router.add_get("/", health_check)
+        setup_frontend_routes(app)
     except Exception:
         logger.exception("Application setup failed")
         raise
