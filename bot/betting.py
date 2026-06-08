@@ -86,7 +86,7 @@ def create_betting_router(mini_app_url: str | None = None) -> Router:
     ) -> None:
         await handle_bet_callback(callback, db_session, state)
 
-    @router.message(BettingStates.waiting_amount)
+    @router.message(BettingStates.waiting_amount, F.text)
     async def stake_amount_handler(
         message: Message,
         db_session: AsyncSession,

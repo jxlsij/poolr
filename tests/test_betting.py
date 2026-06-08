@@ -3,13 +3,14 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
-from aiogram.types import User as TelegramUser
+from aiogram.types import Chat, Message, SuccessfulPayment, User as TelegramUser
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from bot.betting import (
     BetValidationError,
     build_stake_invoice_payload,
     calculate_implied_probability,
+    create_betting_router,
     estimate_payout,
     parse_bet_callback_data,
     parse_stake_invoice_payload,
@@ -103,6 +104,39 @@ def test_build_and_parse_stake_invoice_payload() -> None:
         "option_index": 1,
         "stars_amount": 10,
     }
+
+
+def test_waiting_amount_handler_is_text_only() -> None:
+    router = create_betting_router()
+    amount_handler = next(
+        handler for handler in router.message.handlers if handler.callback.__name__ == "stake_amount_handler"
+    )
+    text_filter = amount_handler.filters[1].magic
+    text_message = Message(
+        message_id=1,
+        date=datetime.now(timezone.utc),
+        chat=Chat(id=202, type="private"),
+        from_user=TelegramUser(id=202, is_bot=False, first_name="Grace"),
+        text="1",
+    )
+    payment_message = Message(
+        message_id=2,
+        date=datetime.now(timezone.utc),
+        chat=Chat(id=202, type="private"),
+        from_user=TelegramUser(id=202, is_bot=False, first_name="Grace"),
+        successful_payment=SuccessfulPayment(
+            currency="XTR",
+            total_amount=1,
+            invoice_payload="{}",
+            telegram_payment_charge_id="charge",
+            provider_payment_charge_id="provider",
+        ),
+    )
+
+    assert len(amount_handler.filters) == 2
+    assert text_filter is not None
+    assert text_filter.resolve(text_message) == "1"
+    assert text_filter.resolve(payment_message) is None
 
 
 def test_parse_bet_callback_data() -> None:
