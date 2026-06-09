@@ -187,8 +187,8 @@ after every meaningful architecture, deployment, environment, or module change.
 ## Important Repos And Deploys
 
 - GitHub: `https://github.com/jxlsij/poolr`
-- Hugging Face Space: `https://huggingface.co/spaces/amiasayedau/poolr`
-- Public Space URL: `https://amiasayedau-poolr.hf.space`
+- Hugging Face Space: `https://huggingface.co/spaces/poolrBot/poolr`
+- Public Space URL: `https://poolrbot-poolr.hf.space`
 - Cloudflare Worker is used as Telegram API proxy because the Hugging Face free
   runtime can block direct outbound calls to `api.telegram.org`.
 - Telegram Inline Mode must be enabled manually in BotFather with `/setinline`
