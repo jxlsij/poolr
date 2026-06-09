@@ -19,6 +19,7 @@ from bot.crud import (
     update_user_balance,
 )
 from bot.models import DepositStatus
+from bot.product_limits import MAX_DEPOSIT_STARS, ProductLimitError, require_stars_limit
 from bot.users import UserModuleError, ensure_user
 
 
@@ -53,6 +54,10 @@ async def send_deposit_invoice(
 ) -> Message:
     _require_positive_int(user_id, "user_id")
     _require_positive_int(stars_amount, "stars_amount")
+    try:
+        require_stars_limit(stars_amount, MAX_DEPOSIT_STARS, "Stars amount")
+    except ProductLimitError as exc:
+        raise PaymentValidationError(str(exc)) from exc
     _require_text(description, "description")
 
     payload = build_deposit_invoice_payload(user_id, stars_amount)
@@ -284,6 +289,10 @@ async def credit_credits(
 def build_deposit_invoice_payload(user_id: int, stars_amount: int) -> str:
     _require_positive_int(user_id, "user_id")
     _require_positive_int(stars_amount, "stars_amount")
+    try:
+        require_stars_limit(stars_amount, MAX_DEPOSIT_STARS, "Stars amount")
+    except ProductLimitError as exc:
+        raise PaymentValidationError(str(exc)) from exc
     return json.dumps(
         {
             "t": PAYLOAD_TYPE_DIRECT_STAKE,

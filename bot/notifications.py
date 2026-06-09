@@ -19,7 +19,7 @@ from bot.database import session_scope
 from bot.handlers.markets import build_market_card_text, build_market_keyboard
 from bot.market_cards import update_market_card_photo
 from bot.models import Bet, Market, MarketStatus, NotificationLog, Payout
-from bot.resolution import auto_cancel_market, build_resolution_keyboard
+from bot.resolution import auto_cancel_market, build_resolution_keyboard, release_available_payouts
 
 
 logger = logging.getLogger(__name__)
@@ -193,6 +193,7 @@ async def run_expiry_check(
     mini_app_url: str | None = None,
 ) -> ExpiryCheckResult:
     now = datetime.now(timezone.utc)
+    await release_available_payouts(session, now)
     approaching_sent = 0
     closed_sent = 0
     auto_cancelled = 0
@@ -338,7 +339,7 @@ async def notify_payout_received(
             text=(
                 f"You won {payout.credits_won} Stars.\n\n"
                 f"Market: {market.question}\n"
-                "The amount is now available for manual TON-equivalent payout."
+                "The amount is held through the dispute window before manual payout."
             ),
         )
     except Exception as exc:

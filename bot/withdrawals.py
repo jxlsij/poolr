@@ -28,6 +28,11 @@ from bot.crud import (
     update_user_balance,
 )
 from bot.models import User, Withdrawal, WithdrawalStatus
+from bot.product_limits import (
+    MAX_WITHDRAWAL_STARS,
+    ProductLimitError,
+    require_stars_limit,
+)
 from bot.security import is_admin
 from bot.users import UserModuleError, ensure_user
 
@@ -38,7 +43,8 @@ T = TypeVar("T")
 
 WITHDRAW_PAID_PREFIX = "withdraw_paid"
 WITHDRAW_REJECT_PREFIX = "withdraw_reject"
-TON_WALLET_PATTERN = re.compile(r"^[A-Za-z0-9_:\-]{20,128}$")
+TON_FRIENDLY_WALLET_PATTERN = re.compile(r"^[A-Za-z0-9_-]{48}$")
+TON_RAW_WALLET_PATTERN = re.compile(r"^-?[0-9]+:[0-9a-fA-F]{64}$")
 TON_TX_HASH_PATTERN = re.compile(r"^[A-Za-z0-9_\-:.]{12,160}$")
 
 
@@ -221,7 +227,9 @@ async def handle_withdraw_command(
                 user_id=user.telegram_id,
                 stars_amount=amount,
                 ton_wallet_address=wallet,
+                admin_ids=admin_ids,
             )
+            await session.commit()
             await notify_admins_for_withdrawal(bot, result.withdrawal, admin_ids)
             await message.answer(_withdrawal_created_text(result.withdrawal))
         except WithdrawalValidationError as exc:
@@ -294,7 +302,9 @@ async def process_withdrawal_wallet(
             user_id=user_id,
             stars_amount=amount,
             ton_wallet_address=wallet,
+            admin_ids=admin_ids,
         )
+        await session.commit()
         await notify_admins_for_withdrawal(bot, result.withdrawal, admin_ids)
         await message.answer(_withdrawal_created_text(result.withdrawal))
     except WithdrawalValidationError as exc:
@@ -320,9 +330,16 @@ async def request_withdrawal(
     user_id: int,
     stars_amount: int,
     ton_wallet_address: str,
+    admin_ids: list[int] | None = None,
 ) -> WithdrawalRequestResult:
     _require_positive_int(user_id, "user_id")
     _require_positive_int(stars_amount, "stars_amount")
+    if admin_ids is not None and not admin_ids:
+        raise WithdrawalValidationError("Payout requests are temporarily unavailable: no payout admins are configured.")
+    try:
+        require_stars_limit(stars_amount, MAX_WITHDRAWAL_STARS, "Withdrawal amount")
+    except ProductLimitError as exc:
+        raise WithdrawalValidationError(str(exc)) from exc
     wallet = validate_ton_wallet(ton_wallet_address)
 
     user = await _get_user_for_update(session, user_id)
@@ -648,6 +665,10 @@ def parse_withdrawal_amount(value: str | None) -> int:
         raise WithdrawalValidationError("Withdrawal amount must be a whole number of Stars.") from exc
     if amount < 1:
         raise WithdrawalValidationError("Withdrawal amount must be at least 1 Star.")
+    try:
+        require_stars_limit(amount, MAX_WITHDRAWAL_STARS, "Withdrawal amount")
+    except ProductLimitError as exc:
+        raise WithdrawalValidationError(str(exc)) from exc
     return amount
 
 
@@ -655,9 +676,13 @@ def validate_ton_wallet(value: str | None) -> str:
     if not isinstance(value, str):
         raise WithdrawalValidationError("TON wallet address is required.")
     wallet = value.strip()
-    if not TON_WALLET_PATTERN.fullmatch(wallet):
-        raise WithdrawalValidationError("TON wallet address looks invalid.")
-    return wallet
+    if TON_RAW_WALLET_PATTERN.fullmatch(wallet):
+        return wallet
+    if TON_FRIENDLY_WALLET_PATTERN.fullmatch(wallet) and wallet[0] in {"E", "U", "k", "0"}:
+        return wallet
+    raise WithdrawalValidationError(
+        "TON wallet address looks invalid. Use a 48-character TON friendly address or raw workchain:hex format."
+    )
 
 
 def validate_ton_tx_hash(value: str | None) -> str:

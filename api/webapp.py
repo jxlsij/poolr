@@ -31,6 +31,13 @@ from bot.crud import (
 from bot.database import session_scope
 from bot.models import Bet, Deposit, Market, MarketStatus, Payout, User, Withdrawal, WithdrawalStatus
 from bot.payments import PaymentModuleError, PaymentProviderError, PaymentValidationError, send_deposit_invoice
+from bot.product_limits import (
+    MAX_DEPOSIT_STARS,
+    MAX_STAKE_STARS,
+    MAX_WITHDRAWAL_STARS,
+    ProductLimitError,
+    require_stars_limit,
+)
 from bot.security import is_admin, validate_webapp_init_data
 from bot.users import UserModuleError, ensure_user_from_webapp_data
 from bot.withdrawals import (
@@ -196,10 +203,12 @@ async def api_get_markets(request: web.Request) -> web.Response:
         markets = list((await ctx.session.scalars(stmt)).all())
         return json_ok(
             {
-                "markets": [
-                    await serialize_market_summary(ctx.session, market, ctx.user.telegram_id)
-                    for market in markets
-                ],
+                "markets": await serialize_market_summaries(
+                    ctx.session,
+                    markets,
+                    ctx.user.telegram_id,
+                    request.app[API_PLATFORM_FEE_PCT_KEY],
+                ),
                 "limit": limit,
                 "offset": offset,
                 "status": status_filter.value if status_filter is not None else "all",
@@ -214,7 +223,14 @@ async def api_get_market(request: web.Request) -> web.Response:
         market = await get_market(ctx.session, market_id)
         if market is None:
             raise ApiNotFoundError("Market was not found.", code="market_not_found")
-        return json_ok(await serialize_market_detail(ctx.session, market, ctx.user.telegram_id))
+        return json_ok(
+            await serialize_market_detail(
+                ctx.session,
+                market,
+                ctx.user.telegram_id,
+                request.app[API_PLATFORM_FEE_PCT_KEY],
+            )
+        )
 
 
 @api_operation("get_chat_markets")
@@ -225,10 +241,12 @@ async def api_get_chat_markets(request: web.Request) -> web.Response:
         return json_ok(
             {
                 "chat_id": chat_id,
-                "markets": [
-                    await serialize_market_summary(ctx.session, market, ctx.user.telegram_id)
-                    for market in markets
-                ],
+                "markets": await serialize_market_summaries(
+                    ctx.session,
+                    markets,
+                    ctx.user.telegram_id,
+                    request.app[API_PLATFORM_FEE_PCT_KEY],
+                ),
             }
         )
 
@@ -333,6 +351,7 @@ async def api_place_bet(request: web.Request) -> web.Response:
         body.get("stars_amount", body.get("credits_amount")),
         "stars_amount",
     )
+    enforce_api_stars_limit(stars_amount, MAX_STAKE_STARS, "stars_amount")
 
     async with api_context(request) as ctx:
         market = await get_market(ctx.session, market_id)
@@ -400,6 +419,7 @@ async def api_place_bet(request: web.Request) -> web.Response:
 async def api_get_deposit_link(request: web.Request) -> web.Response:
     body = await read_json_body(request)
     stars_amount = parse_positive_int(body.get("stars_amount"), "stars_amount")
+    enforce_api_stars_limit(stars_amount, MAX_DEPOSIT_STARS, "stars_amount")
 
     async with api_context(request) as ctx:
         try:
@@ -438,6 +458,7 @@ async def api_request_withdrawal(request: web.Request) -> web.Response:
         body.get("stars_amount", body.get("credits_amount")),
         "stars_amount",
     )
+    enforce_api_stars_limit(stars_amount, MAX_WITHDRAWAL_STARS, "stars_amount")
     ton_wallet_address = validate_ton_wallet(body.get("ton_wallet_address"))
 
     async with api_context(request) as ctx:
@@ -446,7 +467,9 @@ async def api_request_withdrawal(request: web.Request) -> web.Response:
             user_id=ctx.user.telegram_id,
             stars_amount=stars_amount,
             ton_wallet_address=ton_wallet_address,
+            admin_ids=request.app[API_ADMIN_IDS_KEY],
         )
+        await ctx.session.commit()
         await notify_admins_for_withdrawal(
             bot=request.app[API_BOT_KEY],
             withdrawal=result.withdrawal,
@@ -498,6 +521,7 @@ async def serialize_market_detail(
     session: AsyncSession,
     market: Market,
     user_id: int,
+    platform_fee_pct: float = 0.08,
 ) -> dict[str, Any]:
     pool_by_option = normalized_pool(await get_pool_by_option(session, market.id), len(market.options))
     odds = calculate_odds(pool_by_option)
@@ -510,6 +534,7 @@ async def serialize_market_detail(
         "total_pool": sum(pool_by_option.values()),
         "my_bet": serialize_bet(my_bet) if my_bet is not None else None,
         "bets_count": len(bets),
+        "platform_fee_pct": platform_fee_pct,
     }
 
 
@@ -517,8 +542,9 @@ async def serialize_market_summary(
     session: AsyncSession,
     market: Market,
     user_id: int,
+    platform_fee_pct: float = 0.08,
 ) -> dict[str, Any]:
-    detail = await serialize_market_detail(session, market, user_id)
+    detail = await serialize_market_detail(session, market, user_id, platform_fee_pct)
     return {
         key: detail[key]
         for key in (
@@ -540,6 +566,63 @@ async def serialize_market_summary(
             "bets_count",
         )
     }
+
+
+async def serialize_market_summaries(
+    session: AsyncSession,
+    markets: list[Market],
+    user_id: int,
+    platform_fee_pct: float = 0.08,
+) -> list[dict[str, Any]]:
+    if not markets:
+        return []
+
+    market_ids = [market.id for market in markets]
+    pool_rows = (
+        await session.execute(
+            select(Bet.market_id, Bet.option_index, func.coalesce(func.sum(Bet.credits_amount), 0))
+            .where(Bet.market_id.in_(market_ids))
+            .group_by(Bet.market_id, Bet.option_index)
+        )
+    ).all()
+    count_rows = (
+        await session.execute(
+            select(Bet.market_id, func.count())
+            .where(Bet.market_id.in_(market_ids))
+            .group_by(Bet.market_id)
+        )
+    ).all()
+    my_bets = list(
+        (
+            await session.scalars(
+                select(Bet).where(Bet.market_id.in_(market_ids), Bet.user_id == user_id)
+            )
+        ).all()
+    )
+
+    pools: dict[int, dict[int, int]] = {market_id: {} for market_id in market_ids}
+    for market_id, option_index, total in pool_rows:
+        pools[int(market_id)][int(option_index)] = int(total)
+    counts = {int(market_id): int(count) for market_id, count in count_rows}
+    my_bet_by_market = {bet.market_id: bet for bet in my_bets}
+
+    summaries: list[dict[str, Any]] = []
+    for market in markets:
+        pool_by_option = normalized_pool(pools.get(market.id, {}), len(market.options))
+        summaries.append(
+            {
+                **serialize_market_base(market),
+                "pool_by_option": pool_by_option,
+                "odds": calculate_odds(pool_by_option),
+                "total_pool": sum(pool_by_option.values()),
+                "my_bet": serialize_bet(my_bet_by_market[market.id])
+                if market.id in my_bet_by_market
+                else None,
+                "bets_count": counts.get(market.id, 0),
+                "platform_fee_pct": platform_fee_pct,
+            }
+        )
+    return summaries
 
 
 def serialize_market_base(market: Market) -> dict[str, Any]:
@@ -735,13 +818,22 @@ def calculate_odds(pool_by_option: dict[int, int]) -> dict[int, float]:
 def market_validation_message(error: BetValidationError) -> str:
     messages = {
         BetValidationError.MARKET_CLOSED: "Market is closed.",
+        BetValidationError.USER_BANNED: "This account cannot place bets.",
         BetValidationError.CREATOR_CANNOT_BET: "Market creators cannot bet on their own markets.",
         BetValidationError.INSUFFICIENT_BALANCE: "Insufficient Stars balance.",
         BetValidationError.BELOW_MIN_BET: "Stake is below the market minimum.",
+        BetValidationError.ABOVE_MAX_STAKE: f"Stake is above the {MAX_STAKE_STARS} Stars limit.",
         BetValidationError.INVALID_OPTION: "Option does not exist.",
         BetValidationError.ALREADY_BET: "You already have a bet on this market.",
     }
     return messages[error]
+
+
+def enforce_api_stars_limit(amount: int, limit: int, name: str) -> None:
+    try:
+        require_stars_limit(amount, limit, name)
+    except ProductLimitError as exc:
+        raise ApiValidationError(str(exc), code="amount_limit_exceeded") from exc
 
 
 def parse_limit(value: str | None) -> int:

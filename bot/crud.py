@@ -15,9 +15,12 @@ from bot.models import (
     DepositStatus,
     Dispute,
     DisputeStatus,
+    LedgerEntry,
+    LedgerEntryType,
     Market,
     MarketStatus,
     Payout,
+    PayoutStatus,
     User,
     Withdrawal,
     WithdrawalStatus,
@@ -148,6 +151,16 @@ async def update_user_balance(
         )
 
     user.balance_credits = new_balance
+    session.add(
+        LedgerEntry(
+            user_id=telegram_id,
+            amount=delta,
+            entry_type=LedgerEntryType.BALANCE_ADJUSTMENT,
+            source_table="users",
+            source_id=str(telegram_id),
+            entry_metadata={"reason": reason, "new_balance": new_balance},
+        )
+    )
     await session.flush()
     logger.info(
         "Updated user balance: telegram_id=%d delta=%d reason=%s new_balance=%d",
@@ -287,6 +300,9 @@ async def create_market(
     _validate_market_options(options)
     _require_timezone_aware_deadline(deadline)
     _require_positive_int(min_bet, "min_bet")
+    from bot.product_limits import MAX_MARKET_MIN_BET_STARS, require_stars_limit
+
+    require_stars_limit(min_bet, MAX_MARKET_MIN_BET_STARS, "market minimum stake")
 
     market = Market(
         creator_id=creator_id,
@@ -536,6 +552,7 @@ async def create_payout(
     user_id: int,
     market_id: int,
     credits_won: int,
+    available_at: datetime | None = None,
 ) -> Payout:
     _require_positive_int(user_id, "user_id")
     _require_positive_int(market_id, "market_id")
@@ -546,6 +563,8 @@ async def create_payout(
         user_id=user_id,
         market_id=market_id,
         credits_won=credits_won,
+        status=PayoutStatus.HELD,
+        available_at=available_at,
     )
     session.add(payout)
     await session.flush()
@@ -557,6 +576,59 @@ async def create_payout(
         credits_won,
     )
     return payout
+
+
+@db_operation("create_ledger_entry")
+async def create_ledger_entry(
+    session: AsyncSession,
+    *,
+    user_id: int | None,
+    amount: int,
+    entry_type: LedgerEntryType,
+    source_table: str | None = None,
+    source_id: str | int | None = None,
+    idempotency_key: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> LedgerEntry:
+    if user_id is not None:
+        _require_positive_int(user_id, "user_id")
+    _require_non_zero_int(amount, "amount")
+    if not isinstance(entry_type, LedgerEntryType):
+        entry_type = LedgerEntryType(entry_type)
+    if source_table is not None:
+        _require_text(source_table, "source_table")
+    if idempotency_key is not None:
+        _require_text(idempotency_key, "idempotency_key")
+        existing = await session.scalar(
+            select(LedgerEntry).where(LedgerEntry.idempotency_key == idempotency_key)
+        )
+        if existing is not None:
+            return existing
+
+    entry = LedgerEntry(
+        user_id=user_id,
+        amount=amount,
+        entry_type=entry_type,
+        source_table=source_table,
+        source_id=str(source_id) if source_id is not None else None,
+        idempotency_key=idempotency_key,
+        entry_metadata=metadata or {},
+    )
+    session.add(entry)
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        raise DuplicateRecordError("Ledger idempotency key already exists") from exc
+    logger.info(
+        "Created ledger entry: id=%d user_id=%s amount=%d type=%s source=%s:%s",
+        entry.id,
+        user_id,
+        amount,
+        entry.entry_type.value,
+        source_table,
+        source_id,
+    )
+    return entry
 
 
 @db_operation("get_payouts_for_market")

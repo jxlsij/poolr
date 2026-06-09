@@ -17,6 +17,7 @@ from bot.models import Base, MarketStatus
 
 
 BOT_TOKEN = "123456:test-token"
+VALID_TON_WALLET = "0:" + "a" * 64
 
 
 class FakeBot:
@@ -290,7 +291,7 @@ async def test_withdrawal_request_reserves_balance(api_client, session_factory) 
         headers=auth_headers(42),
         json={
             "stars_amount": 20,
-            "ton_wallet_address": "EQCabcdefghijklmnopqrstuvwxyz1234567890",
+            "ton_wallet_address": VALID_TON_WALLET,
         },
     )
 
@@ -314,7 +315,7 @@ async def test_withdrawal_validation_error_returns_400(api_client, session_facto
         headers=auth_headers(42),
         json={
             "stars_amount": 20,
-            "ton_wallet_address": "EQCabcdefghijklmnopqrstuvwxyz1234567890",
+            "ton_wallet_address": VALID_TON_WALLET,
         },
     )
 

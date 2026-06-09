@@ -35,7 +35,7 @@ T = TypeVar("T")
 DISPUTE_CALLBACK_PREFIX = "dispute"
 ARBITRATE_CALLBACK_PREFIX = "arbitrate"
 REJECT_DISPUTE_CALLBACK_PREFIX = "reject_dispute"
-DISPUTE_WINDOW = timedelta(hours=2)
+DISPUTE_WINDOW = timedelta(hours=24)
 
 
 class SuspicionLevel(StrEnum):
@@ -285,9 +285,22 @@ async def admin_arbitrate(
 
     if existing_payouts:
         logger.warning(
-            "Skipping automatic payout redistribution for disputed market with existing payouts: market_id=%d payouts=%d",
+            "Cancelling held payouts before arbitration redistribution: market_id=%d payouts=%d",
             market_id,
             len(existing_payouts),
+        )
+        for payout in existing_payouts:
+            if payout.status.value != "held":
+                raise FraudValidationError("This market has released payouts and requires manual ledger repair.")
+            payout.credits_won = 0
+            payout.status = payout.status
+        bets = await get_bets_for_market(session, market_id, for_update=True)
+        payouts, platform_fee_collected = await distribute_payouts(
+            session=session,
+            market=market,
+            winning_option_index=winning_option_index,
+            platform_fee_pct=platform_fee_pct,
+            bets=bets,
         )
     else:
         bets = await get_bets_for_market(session, market_id, for_update=True)

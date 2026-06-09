@@ -135,7 +135,7 @@ async def test_freeze_market_for_dispute_marks_market_disputed_and_notifies_admi
 async def test_freeze_market_for_dispute_rejects_closed_window(session_factory) -> None:
     async with session_factory() as session:
         market = await _create_resolved_market(session)
-        market.resolved_at = datetime.now(timezone.utc) - timedelta(hours=3)
+        market.resolved_at = datetime.now(timezone.utc) - timedelta(hours=25)
         await session.flush()
 
         with pytest.raises(FraudValidationError):
@@ -228,7 +228,7 @@ async def test_admin_arbitrate_reopens_resolved_status_without_double_payout(
         dispute = await get_open_dispute_for_market(session, market.id)
 
     assert result.market.status == MarketStatus.RESOLVED
-    assert result.payouts_created == 0
+    assert result.payouts_created == 1
     assert result.dispute is not None
     assert result.dispute.status.value == "resolved"
     assert dispute is None

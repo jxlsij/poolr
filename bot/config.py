@@ -127,8 +127,8 @@ def _parse_float(value: str, key: str) -> float:
     except ValueError as exc:
         raise ConfigError(f"{key} must be a float") from exc
 
-    if parsed < 0:
-        raise ConfigError(f"{key} must be non-negative")
+    if parsed < 0 or parsed >= 1:
+        raise ConfigError(f"{key} must be in the range [0, 1)")
 
     return parsed
 

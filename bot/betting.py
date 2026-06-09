@@ -33,6 +33,7 @@ from bot.payments import (
     PaymentProviderError,
     PaymentValidationError,
 )
+from bot.product_limits import MAX_STAKE_STARS, ProductLimitError, require_stars_limit
 from bot.users import UserModuleError, ensure_user
 
 
@@ -56,9 +57,11 @@ class BettingProviderError(BettingModuleError):
 
 class BetValidationError(StrEnum):
     MARKET_CLOSED = "market_closed"
+    USER_BANNED = "user_banned"
     CREATOR_CANNOT_BET = "creator_cannot_bet"
     INSUFFICIENT_BALANCE = "insufficient_balance"
     BELOW_MIN_BET = "below_min_bet"
+    ABOVE_MAX_STAKE = "above_max_stake"
     INVALID_OPTION = "invalid_option"
     ALREADY_BET = "already_bet"
 
@@ -447,12 +450,18 @@ def validate_stake_invoice_request(
 ) -> BetValidationError | None:
     if market.status != MarketStatus.ACTIVE or _is_past_deadline(market.deadline):
         return BetValidationError.MARKET_CLOSED
+    if user.is_banned:
+        return BetValidationError.USER_BANNED
     if market.creator_id == user.telegram_id:
         return BetValidationError.CREATOR_CANNOT_BET
     if option_index < 0 or option_index >= len(market.options):
         return BetValidationError.INVALID_OPTION
     if stars_amount < market.min_bet:
         return BetValidationError.BELOW_MIN_BET
+    try:
+        require_stars_limit(stars_amount, MAX_STAKE_STARS, "stake amount")
+    except ProductLimitError:
+        return BetValidationError.ABOVE_MAX_STAKE
     return None
 
 
@@ -583,6 +592,10 @@ def parse_stake_amount(value: str | None) -> int:
         raise ValueError("Stake amount must be a whole number of Stars.") from exc
     if amount < 1:
         raise ValueError("Stake amount must be at least 1 Star.")
+    try:
+        require_stars_limit(amount, MAX_STAKE_STARS, "Stake amount")
+    except ProductLimitError as exc:
+        raise ValueError(str(exc)) from exc
     return amount
 
 
@@ -661,11 +674,15 @@ async def _answer_callback(
 def _validation_message(error: BetValidationError, market: Market | None = None) -> str:
     if error == BetValidationError.MARKET_CLOSED:
         return "This market is closed."
+    if error == BetValidationError.USER_BANNED:
+        return "This account cannot place bets."
     if error == BetValidationError.CREATOR_CANNOT_BET:
         return "Market creators cannot bet on their own markets."
     if error == BetValidationError.BELOW_MIN_BET:
         minimum = f" Minimum is {market.min_bet} Stars." if market is not None else ""
         return f"Stake is below the market minimum.{minimum}"
+    if error == BetValidationError.ABOVE_MAX_STAKE:
+        return f"Stake is above the {MAX_STAKE_STARS} Stars limit."
     if error == BetValidationError.INVALID_OPTION:
         return "This market option is invalid."
     if error == BetValidationError.ALREADY_BET:
