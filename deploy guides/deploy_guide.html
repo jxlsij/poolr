@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Деплой Telegram-бота бесплатно</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --accent: #6c63ff;
+    --accent2: #ff6584;
+    --green: #00d9a6;
+    --yellow: #ffd166;
+    --text: #e8eaf6;
+    --text-muted: #8892b0;
+    --border: #2d3154;
+    --radius: 12px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 40px 20px;
+  }
+
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  /* HERO */
+  .hero {
+    background: linear-gradient(135deg, #1a1d27 0%, #16213e 50%, #1a1d27 100%);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 60px 50px;
+    margin-bottom: 40px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -100px; right: -100px;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(108,99,255,0.15) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  .hero-badge {
+    display: inline-block;
+    background: rgba(108,99,255,0.2);
+    border: 1px solid rgba(108,99,255,0.4);
+    color: #a29bfe;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border-radius: 100px;
+    margin-bottom: 24px;
+  }
+
+  .hero h1 {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1.2;
+    margin-bottom: 20px;
+    background: linear-gradient(135deg, #e8eaf6 0%, #a29bfe 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero p {
+    font-size: 18px;
+    color: var(--text-muted);
+    max-width: 560px;
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: 30px;
+    margin-top: 40px;
+  }
+
+  .stat {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    flex: 1;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .stat-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  /* SERVICES */
+  .services-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+
+  .service-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .service-icon {
+    font-size: 32px;
+    flex-shrink: 0;
+  }
+
+  .service-name {
+    font-weight: 600;
+    font-size: 15px;
+  }
+
+  .service-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  .service-tag {
+    display: inline-block;
+    background: rgba(0,217,166,0.15);
+    color: var(--green);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 100px;
+    margin-top: 8px;
+  }
+
+  /* STEPS */
+  .step {
+    margin-bottom: 32px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .step-header {
+    padding: 24px 28px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .step-num {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), #a29bfe);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .step-title {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .step-time {
+    margin-left: auto;
+    background: rgba(255,209,102,0.15);
+    color: var(--yellow);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 100px;
+  }
+
+  .step-body {
+    padding: 28px;
+  }
+
+  .step-body p {
+    color: var(--text-muted);
+    margin-bottom: 16px;
+  }
+
+  /* CODE */
+  pre {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin: 16px 0;
+    position: relative;
+  }
+
+  pre code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #cdd9e5;
+  }
+
+  .code-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  /* SUBSTEPS */
+  .substep {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+    align-items: flex-start;
+  }
+
+  .substep-num {
+    width: 26px; height: 26px;
+    background: rgba(108,99,255,0.2);
+    border: 1px solid rgba(108,99,255,0.4);
+    color: #a29bfe;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  /* ENV VARS */
+  .env-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+  }
+
+  .env-table th {
+    text-align: left;
+    padding: 10px 16px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .env-table td {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 14px;
+  }
+
+  .env-table td:first-child {
+    font-family: 'JetBrains Mono', monospace;
+    color: #a29bfe;
+    font-size: 13px;
+  }
+
+  /* TIP */
+  .tip {
+    background: rgba(108,99,255,0.08);
+    border: 1px solid rgba(108,99,255,0.25);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin: 16px 0;
+    font-size: 14px;
+    color: #c5c0ff;
+  }
+
+  /* SUCCESS */
+  .success {
+    background: rgba(0,217,166,0.08);
+    border: 1px solid rgba(0,217,166,0.25);
+    border-left: 3px solid var(--green);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin: 16px 0;
+    font-size: 14px;
+    color: #a0f2e0;
+  }
+
+  /* ERRORS TABLE */
+  .errors-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .errors-table th {
+    text-align: left;
+    padding: 10px 16px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .errors-table td {
+    padding: 14px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    vertical-align: top;
+  }
+
+  .errors-table td:first-child {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent2);
+    font-size: 12px;
+  }
+
+  .section-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    color: var(--text);
+  }
+
+  /* PRINT */
+  @media print {
+    body { background: white; color: black; padding: 0; }
+    .hero { background: #f0f0ff; border-color: #ddd; }
+    .hero h1 { -webkit-text-fill-color: #333; }
+    pre { background: #f5f5f5; }
+    .step { border-color: #ddd; }
+    .step-header { background: #f5f5f5; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-badge">Бесплатный деплой · 2026</div>
+    <h1>Деплой Telegram-бота<br>без карты и без оплаты</h1>
+    <p>Пошаговый гайд по деплою Python-бота на HuggingFace Spaces с Cloudflare Worker и автопингом. Работает 24/7.</p>
+    <div class="hero-stats">
+      <div class="stat">
+        <div class="stat-value">0 ₽</div>
+        <div class="stat-label">Стоимость в месяц</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">30 мин</div>
+        <div class="stat-label">Повторный деплой</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">24/7</div>
+        <div class="stat-label">Аптайм</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SERVICES -->
+  <p class="section-title">Что используем</p>
+  <div class="services-grid">
+    <div class="service-card">
+      <div class="service-icon">🤗</div>
+      <div>
+        <div class="service-name">HuggingFace Spaces</div>
+        <div class="service-desc">Хостинг Docker-контейнера с ботом</div>
+        <span class="service-tag">без карты</span>
+      </div>
+    </div>
+    <div class="service-card">
+      <div class="service-icon">☁️</div>
+      <div>
+        <div class="service-name">Cloudflare Workers</div>
+        <div class="service-desc">Прокси к api.telegram.org — 100k запросов/день</div>
+        <span class="service-tag">без карты</span>
+      </div>
+    </div>
+    <div class="service-card">
+      <div class="service-icon">⏰</div>
+      <div>
+        <div class="service-name">cron-job.org</div>
+        <div class="service-desc">Пингует сервер каждые 5 минут</div>
+        <span class="service-tag">без карты</span>
+      </div>
+    </div>
+    <div class="service-card">
+      <div class="service-icon">🐙</div>
+      <div>
+        <div class="service-name">GitHub</div>
+        <div class="service-desc">Хранение кода и CI/CD</div>
+        <span class="service-tag">без карты</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">Подготовка кода</div>
+      <div class="step-time">~20 мин</div>
+    </div>
+    <div class="step-body">
+      <p>Добавляем в <strong>main.py</strong> поддержку Cloudflare-прокси и webhook-сервер на порту 7860.</p>
+
+      <span class="code-label">// В начало main.py — импорты и прокси</span>
+      <pre><code>import json
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+_telegram_api_url = os.getenv('TELEGRAM_API_URL')
+if _telegram_api_url:
+    telebot.apihelper.API_URL = _telegram_api_url</code></pre>
+
+      <span class="code-label">// Заменяем bot.infinity_polling() на webhook + HTTP-сервер</span>
+      <pre><code>WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+
+class _BotHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        logger.info("Пинг получен")
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def do_POST(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            update = telebot.types.Update.de_json(json.loads(body.decode('utf-8')))
+            bot.process_new_updates([update])
+        except Exception as e:
+            logger.error(f"Webhook update error: {e}")
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+if WEBHOOK_URL:
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=WEBHOOK_URL)
+        logger.info("Webhook установлен")
+    except Exception as e:
+        logger.error(f"Ошибка: {e}")
+    HTTPServer(("0.0.0.0", 7860), _BotHandler).serve_forever()
+else:
+    try:
+        bot.remove_webhook()
+    except: pass
+    bot.infinity_polling(timeout=60, long_polling_timeout=60)</code></pre>
+
+      <span class="code-label">// Dockerfile в корне проекта</span>
+      <pre><code>FROM python:3.11-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends gcc \
+    && rm -rf /var/lib/apt/lists/*
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY *.py ./
+EXPOSE 7860
+CMD ["python", "main.py"]</code></pre>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">Cloudflare Worker — прокси</div>
+      <div class="step-time">~15 мин</div>
+    </div>
+    <div class="step-body">
+      <p>HuggingFace блокирует прямые соединения к api.telegram.org. Cloudflare Worker — бесплатная прокладка.</p>
+      <div class="substep"><div class="substep-num">1</div><div>Зарегистрироваться на <strong>cloudflare.com</strong> (только email)</div></div>
+      <div class="substep"><div class="substep-num">2</div><div>Workers & Pages → Create → Start with Hello World</div></div>
+      <div class="substep"><div class="substep-num">3</div><div>Вставить код и нажать Deploy</div></div>
+      <pre><code>export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const telegramUrl = "https://api.telegram.org" + url.pathname + url.search;
+    return fetch(new Request(telegramUrl, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+    }));
+  }
+};</code></pre>
+      <div class="substep"><div class="substep-num">4</div><div>Скопировать URL воркера: <code>https://xxx.workers.dev</code></div></div>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">HuggingFace Space</div>
+      <div class="step-time">~20 мин</div>
+    </div>
+    <div class="step-body">
+      <div class="substep"><div class="substep-num">1</div><div>Зарегистрироваться на <strong>huggingface.co</strong></div></div>
+      <div class="substep"><div class="substep-num">2</div><div>New Space → Docker → Public</div></div>
+      <div class="substep"><div class="substep-num">3</div><div>Загрузить файлы: все .py, Dockerfile, requirements.txt</div></div>
+      <div class="substep"><div class="substep-num">4</div><div>Settings → Variables and secrets — добавить переменные:</div></div>
+
+      <table class="env-table">
+        <tr><th>Переменная</th><th>Значение</th></tr>
+        <tr><td>BOT_TOKEN</td><td>Токен от @BotFather</td></tr>
+        <tr><td>WEBHOOK_URL</td><td>https://username-spacename.hf.space</td></tr>
+        <tr><td>TELEGRAM_API_URL</td><td>https://xxx.workers.dev/bot{0}/{1}</td></tr>
+      </table>
+
+      <div class="tip">💡 Как найти WEBHOOK_URL: открой Space → кнопка "открыть в новой вкладке" → скопируй URL.<br>
+      Формат: <code>https://{username}-{spacename}.hf.space</code> (строчные буквы, _ → -)</div>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">Пингователь — cron-job.org</div>
+      <div class="step-time">~10 мин</div>
+    </div>
+    <div class="step-body">
+      <p>Без пинга HuggingFace засыпает через ~30 минут.</p>
+      <div class="substep"><div class="substep-num">1</div><div>Зарегистрироваться на <strong>console.cron-job.org</strong></div></div>
+      <div class="substep"><div class="substep-num">2</div><div>Create cronjob → URL: твой WEBHOOK_URL</div></div>
+      <div class="substep"><div class="substep-num">3</div><div>Schedule: каждые <strong>5 минут</strong> → Save</div></div>
+    </div>
+  </div>
+
+  <!-- SUCCESS -->
+  <div class="success">
+    ✅ <strong>Всё работает, если в логах HuggingFace видно:</strong><br><br>
+    <code>🌐 Webhook режим: https://...</code><br>
+    <code>✅ Webhook установлен</code><br>
+    <code>📡 Пинг получен</code>
+  </div>
+
+  <!-- ERRORS -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num">!</div>
+      <div class="step-title">Частые проблемы</div>
+    </div>
+    <div class="step-body">
+      <table class="errors-table">
+        <tr><th>Ошибка</th><th>Причина</th><th>Решение</th></tr>
+        <tr>
+          <td>Read timed out</td>
+          <td>HF блокирует api.telegram.org</td>
+          <td>Настроить Cloudflare Worker + TELEGRAM_API_URL</td>
+        </tr>
+        <tr>
+          <td>Бот не отвечает</td>
+          <td>Неверный WEBHOOK_URL</td>
+          <td>Открыть Space в новой вкладке — скопировать реальный URL</td>
+        </tr>
+        <tr>
+          <td>Invalid JWT Signature</td>
+          <td>credentials.json повреждён</td>
+          <td>Пересоздать ключ в Google Cloud Console</td>
+        </tr>
+        <tr>
+          <td>Space засыпает</td>
+          <td>Нет пингователя</td>
+          <td>Настроить cron-job.org каждые 5 минут</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

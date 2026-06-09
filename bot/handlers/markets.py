@@ -1,0 +1,934 @@
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from urllib.parse import urlparse
+
+from aiogram import Bot, F, Router
+from aiogram.filters import Command, StateFilter
+from aiogram.filters.command import CommandObject
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    CallbackQuery,
+    ChosenInlineResult,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InlineQuery,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+    Message,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.crud import (
+    DatabaseLayerError,
+    create_market,
+    get_pool_by_option,
+    update_market_inline_message_id,
+    update_market_message_id,
+)
+from bot.market_cards import send_market_card_photo, update_market_card_photo
+from bot.models import Market, MarketStatus
+from bot.users import UserModuleError, ensure_user
+
+
+logger = logging.getLogger(__name__)
+
+MAX_QUESTION_LENGTH = 200
+MIN_MARKET_DURATION = timedelta(minutes=15)
+MAX_MARKET_DURATION = timedelta(days=7)
+DEFAULT_OPTIONS = ["Yes", "No"]
+INLINE_MARKET_CHAT_ID = 0
+INLINE_DEFAULT_DURATION = timedelta(hours=2)
+INLINE_DEFAULT_MIN_BET = 1
+INLINE_DURATION_CHOICES: tuple[tuple[str, timedelta], ...] = (
+    ("15m", timedelta(minutes=15)),
+    ("45m", timedelta(minutes=45)),
+    ("2h", timedelta(hours=2)),
+    ("1d", timedelta(days=1)),
+    ("7d", timedelta(days=7)),
+)
+INLINE_OPTION_PRESETS: dict[str, list[str]] = {
+    "yn": ["Yes", "No"],
+    "ynm": ["Yes", "No", "Maybe"],
+    "abc4": ["A", "B", "C", "D"],
+    "abc5": ["A", "B", "C", "D", "E"],
+    "abc6": ["A", "B", "C", "D", "E", "F"],
+}
+INLINE_DRAFT_PREFIX = "draft"
+
+
+@dataclass(frozen=True)
+class InlineMarketDraft:
+    question: str
+    options: list[str] | None = None
+    duration: timedelta | None = None
+
+
+class MarketCreationError(RuntimeError):
+    """Base error for Module 6 market creation operations."""
+
+
+class MarketCreationValidationError(MarketCreationError, ValueError):
+    """Raised when user-provided market creation input is invalid."""
+
+
+class MarketCreationPersistenceError(MarketCreationError):
+    """Raised when a valid market cannot be stored or published."""
+
+
+class MarketCreationStates(StatesGroup):
+    waiting_question = State()
+    waiting_options = State()
+    waiting_deadline = State()
+    waiting_min_bet = State()
+    confirm = State()
+
+
+def create_markets_router(mini_app_url: str | None = None) -> Router:
+    router = Router(name="markets")
+
+    @router.message(Command("bet", ignore_mention=True))
+    async def bet_command_handler(
+        message: Message,
+        state: FSMContext,
+        command: CommandObject,
+    ) -> None:
+        await handle_bet_command(message, state, command)
+
+    @router.message(StateFilter(None), F.text.regexp(r"^@\w+\s+.+"))
+    async def mention_market_handler(message: Message, state: FSMContext) -> None:
+        await handle_mention_market(message, state)
+
+    @router.inline_query()
+    async def inline_market_handler(
+        query: InlineQuery,
+        db_session: AsyncSession,
+    ) -> None:
+        await handle_inline_market_query(query, db_session, mini_app_url)
+
+    @router.chosen_inline_result()
+    async def chosen_inline_market_handler(
+        result: ChosenInlineResult,
+        db_session: AsyncSession,
+        bot: Bot,
+    ) -> None:
+        await handle_chosen_inline_market(result, db_session, bot, mini_app_url)
+
+    @router.callback_query(F.data == "inline_market_pending")
+    async def inline_market_pending_handler(callback: CallbackQuery) -> None:
+        await callback.answer("Creating market...")
+
+    @router.message(MarketCreationStates.waiting_question)
+    async def question_input_handler(message: Message, state: FSMContext) -> None:
+        await process_question_input(message, state)
+
+    @router.message(MarketCreationStates.waiting_options)
+    async def options_input_handler(message: Message, state: FSMContext) -> None:
+        await process_options_input(message, state)
+
+    @router.message(MarketCreationStates.waiting_deadline)
+    async def deadline_input_handler(message: Message, state: FSMContext) -> None:
+        await process_deadline_input(message, state)
+
+    @router.message(MarketCreationStates.waiting_min_bet)
+    async def min_bet_input_handler(
+        message: Message,
+        state: FSMContext,
+        db_session: AsyncSession,
+        bot: Bot,
+    ) -> None:
+        await process_min_bet_input(
+            message=message,
+            state=state,
+            session=db_session,
+            bot=bot,
+            mini_app_url=mini_app_url,
+        )
+
+    return router
+
+
+async def handle_bet_command(
+    message: Message,
+    state: FSMContext,
+    command: CommandObject | None = None,
+) -> None:
+    question = (command.args or "").strip() if command else ""
+    logger.info(
+        "Starting market creation flow: chat_id=%s user_id=%s has_inline_question=%s",
+        message.chat.id if message.chat else None,
+        message.from_user.id if message.from_user else None,
+        bool(question),
+    )
+
+    await state.clear()
+    if question:
+        try:
+            _validate_question(question)
+        except MarketCreationValidationError as exc:
+            await message.answer(str(exc))
+            return
+
+        await state.update_data(question=question)
+        await state.set_state(MarketCreationStates.waiting_options)
+        await message.answer(
+            "Send 2-6 options, separated by commas or new lines.\n"
+            "Example: Yes, No"
+        )
+        return
+
+    await state.set_state(MarketCreationStates.waiting_question)
+    await message.answer("Send the market question, up to 200 characters.")
+
+
+async def handle_mention_market(message: Message, state: FSMContext) -> None:
+    text = _message_text(message)
+    _mention, _separator, question = text.partition(" ")
+    question = question.strip()
+    logger.info(
+        "Starting mention market creation flow: chat_id=%s user_id=%s",
+        message.chat.id if message.chat else None,
+        message.from_user.id if message.from_user else None,
+    )
+
+    await state.clear()
+    try:
+        _validate_question(question)
+    except MarketCreationValidationError as exc:
+        await message.answer(str(exc))
+        return
+
+    await state.update_data(question=question)
+    await state.set_state(MarketCreationStates.waiting_options)
+    await message.answer(
+        "Send 2-6 options, separated by commas or new lines.\n"
+        "Example: Yes, No"
+    )
+
+
+async def handle_inline_market_query(
+    query: InlineQuery,
+    _session: AsyncSession,
+    mini_app_url: str | None = None,
+) -> None:
+    question = query.query.strip()
+    logger.info(
+        "Handling inline market query: inline_query_id=%s user_id=%s length=%d",
+        query.id,
+        query.from_user.id,
+        len(question),
+    )
+
+    if not question:
+        await query.answer(
+            results=[],
+            cache_time=1,
+            is_personal=True,
+            switch_pm_text="Type a question after @pooolr_bot",
+            switch_pm_parameter="inline-help",
+        )
+        return
+
+    try:
+        draft = parse_inline_market_draft(question)
+        results = build_inline_market_preview_results(draft, mini_app_url=mini_app_url)
+    except MarketCreationValidationError as exc:
+        logger.exception(
+            "Inline market preview failed: inline_query_id=%s user_id=%s",
+            query.id,
+            query.from_user.id,
+        )
+        await query.answer(
+            results=[],
+            cache_time=1,
+            is_personal=True,
+            switch_pm_text=str(exc),
+            switch_pm_parameter="inline-error",
+        )
+        return
+
+    await query.answer(results=results, cache_time=1, is_personal=True)
+    logger.info(
+        "Answered inline market query with lazy previews: inline_query_id=%s results=%d",
+        query.id,
+        len(results),
+    )
+
+
+async def handle_chosen_inline_market(
+    result: ChosenInlineResult,
+    session: AsyncSession,
+    bot: Bot | None = None,
+    mini_app_url: str | None = None,
+) -> None:
+    market_id = _parse_inline_result_market_id(result.result_id)
+    if market_id is not None:
+        if result.inline_message_id is None:
+            logger.debug(
+                "Ignoring chosen persisted inline result without message id: result_id=%s",
+                result.result_id,
+            )
+            return
+        try:
+            await update_market_inline_message_id(session, market_id, result.inline_message_id)
+        except DatabaseLayerError as exc:
+            logger.exception("Could not persist inline message id: market_id=%d", market_id)
+            raise MarketCreationPersistenceError("Could not persist inline message id") from exc
+        return
+
+    inline_draft_result = _parse_inline_draft_result_id(result.result_id)
+    if inline_draft_result is None:
+        logger.debug(
+            "Ignoring chosen inline result without market draft id: result_id=%s",
+            result.result_id,
+        )
+        return
+
+    try:
+        draft = parse_inline_market_draft(result.query)
+        options = _resolve_inline_draft_options(inline_draft_result[0], draft)
+        duration = _resolve_inline_draft_duration(inline_draft_result[1])
+        question = draft.question
+        user, _is_new = await ensure_user(session, result.from_user)
+        deadline = datetime.now(timezone.utc) + duration
+        market = await create_market(
+            session=session,
+            creator_id=user.telegram_id,
+            chat_id=INLINE_MARKET_CHAT_ID,
+            question=question,
+            options=options,
+            deadline=deadline,
+            min_bet=INLINE_DEFAULT_MIN_BET,
+        )
+        if result.inline_message_id is not None:
+            await update_market_inline_message_id(session, market.id, result.inline_message_id)
+            if bot is not None:
+                pool_by_option = await get_pool_by_option(session, market.id)
+                await update_inline_market_card(
+                    bot=bot,
+                    inline_message_id=result.inline_message_id,
+                    market=market,
+                    pool_by_option=pool_by_option,
+                    mini_app_url=mini_app_url,
+                )
+    except (MarketCreationValidationError, UserModuleError, DatabaseLayerError) as exc:
+        logger.exception(
+            "Chosen inline market creation failed: result_id=%s user_id=%s",
+            result.result_id,
+            result.from_user.id,
+        )
+        raise MarketCreationPersistenceError("Chosen inline market creation failed") from exc
+
+
+async def process_question_input(message: Message, state: FSMContext) -> None:
+    question = _message_text(message)
+    try:
+        _validate_question(question)
+    except MarketCreationValidationError as exc:
+        await message.answer(str(exc))
+        return
+
+    await state.update_data(question=question)
+    await state.set_state(MarketCreationStates.waiting_options)
+    logger.debug("Market question accepted: chat_id=%s length=%d", message.chat.id, len(question))
+    await message.answer(
+        "Send 2-6 options, separated by commas or new lines.\n"
+        "Example: Yes, No"
+    )
+
+
+async def process_options_input(message: Message, state: FSMContext) -> None:
+    try:
+        options = parse_options_string(_message_text(message))
+    except MarketCreationValidationError as exc:
+        await message.answer(str(exc))
+        return
+
+    await state.update_data(options=options)
+    await state.set_state(MarketCreationStates.waiting_deadline)
+    logger.debug("Market options accepted: chat_id=%s count=%d", message.chat.id, len(options))
+    await message.answer("Send a deadline: 15m, 45m, 2h, 1d, up to 7d.")
+
+
+async def process_deadline_input(message: Message, state: FSMContext) -> None:
+    duration = parse_deadline_string(_message_text(message))
+    if duration is None:
+        await message.answer("Invalid deadline. Use 15m-7d, for example 45m, 2h, or 1d.")
+        return
+
+    deadline = datetime.now(timezone.utc) + duration
+    await state.update_data(deadline=deadline.isoformat())
+    await state.set_state(MarketCreationStates.waiting_min_bet)
+    logger.debug(
+        "Market deadline accepted: chat_id=%s duration_seconds=%d",
+        message.chat.id,
+        int(duration.total_seconds()),
+    )
+    await message.answer("Send the minimum stake in Stars, at least 1.")
+
+
+async def process_min_bet_input(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    bot: Bot,
+    mini_app_url: str | None = None,
+) -> None:
+    try:
+        min_bet = _parse_min_bet(_message_text(message))
+    except MarketCreationValidationError as exc:
+        await message.answer(str(exc))
+        return
+
+    if message.from_user is None:
+        await message.answer("Could not identify the market creator.")
+        return
+
+    data = await state.get_data()
+    try:
+        question = _validate_question(str(data.get("question") or ""))
+        options = _validate_options(data.get("options"))
+        deadline = _parse_deadline_from_state(data.get("deadline"))
+        user, _is_new = await ensure_user(session, message.from_user)
+        market = await create_market(
+            session=session,
+            creator_id=user.telegram_id,
+            chat_id=message.chat.id,
+            question=question,
+            options=options,
+            deadline=deadline,
+            min_bet=min_bet,
+        )
+        pool_by_option = await get_pool_by_option(session, market.id)
+        market_message = await publish_market_card(
+            bot=bot,
+            chat_id=message.chat.id,
+            market=market,
+            pool_by_option=pool_by_option,
+            mini_app_url=mini_app_url,
+        )
+        await update_market_message_id(session, market.id, market_message.message_id)
+    except (MarketCreationValidationError, UserModuleError, DatabaseLayerError) as exc:
+        logger.exception(
+            "Market creation failed: chat_id=%s user_id=%s",
+            message.chat.id,
+            message.from_user.id,
+        )
+        await message.answer("Could not create this market. Please try again.")
+        raise MarketCreationPersistenceError("Market creation failed") from exc
+    except Exception as exc:
+        logger.exception(
+            "Unexpected market creation failure: chat_id=%s user_id=%s",
+            message.chat.id,
+            message.from_user.id,
+        )
+        await message.answer("Could not create this market. Please try again.")
+        raise MarketCreationPersistenceError("Unexpected market creation failure") from exc
+
+    await state.clear()
+    logger.info(
+        "Market created and published: market_id=%d chat_id=%d creator_id=%d message_id=%d",
+        market.id,
+        market.chat_id,
+        market.creator_id,
+        market_message.message_id,
+    )
+
+
+def parse_deadline_string(deadline_str: str) -> timedelta | None:
+    text = deadline_str.strip().lower()
+    match = re.fullmatch(r"(\d+)([mhd])", text)
+    if not match:
+        return None
+
+    amount = int(match.group(1))
+    unit = match.group(2)
+    if unit == "m":
+        duration = timedelta(minutes=amount)
+    elif unit == "h":
+        duration = timedelta(hours=amount)
+    else:
+        duration = timedelta(days=amount)
+
+    if duration < MIN_MARKET_DURATION or duration > MAX_MARKET_DURATION:
+        return None
+    return duration
+
+
+def parse_options_string(options_text: str) -> list[str]:
+    raw_parts = re.split(r"[\n,]", options_text)
+    options: list[str] = []
+    seen: set[str] = set()
+    for part in raw_parts:
+        option = " ".join(part.strip().split())
+        if not option:
+            continue
+        key = option.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        options.append(option)
+
+    return _validate_options(options)
+
+
+def parse_inline_market_draft(query: str) -> InlineMarketDraft:
+    parts = [part.strip() for part in query.split("|")]
+    parts = [part for part in parts if part]
+    if not parts:
+        raise MarketCreationValidationError("Question cannot be empty.")
+    if len(parts) > 3:
+        raise MarketCreationValidationError("Use: question | option 1, option 2 | 2h")
+
+    question = _validate_question(parts[0])
+    options: list[str] | None = None
+    duration: timedelta | None = None
+
+    for raw_part in parts[1:]:
+        parsed_duration = parse_deadline_string(raw_part)
+        if parsed_duration is not None:
+            duration = parsed_duration
+            continue
+        if options is None:
+            options = parse_options_string(raw_part)
+            continue
+        raise MarketCreationValidationError("Use: question | option 1, option 2 | 2h")
+
+    return InlineMarketDraft(question=question, options=options, duration=duration)
+
+
+def build_market_card_text(
+    market: Market,
+    pool_by_option: dict[int, int],
+) -> str:
+    total_pool = sum(pool_by_option.values())
+    deadline = _format_deadline(market.deadline)
+    lines = [
+        f"Poolr market #{market.id}",
+        "",
+        market.question,
+        "",
+        f"Pool: {total_pool} Stars",
+        f"Min stake: {market.min_bet} Stars",
+        f"Deadline: {deadline}",
+        "",
+        "Options:",
+    ]
+
+    for index, option in enumerate(market.options):
+        option_pool = pool_by_option.get(index, 0)
+        pct = int(round((option_pool / total_pool) * 100)) if total_pool else 0
+        lines.append(f"{index + 1}. {option} - {option_pool} Stars ({pct}%)")
+
+    return "\n".join(lines)
+
+
+def build_inline_market_text(
+    market: Market,
+    pool_by_option: dict[int, int],
+) -> str:
+    total_pool = sum(pool_by_option.values())
+    deadline = _format_deadline(market.deadline)
+    option_lines = []
+    for index, option in enumerate(market.options):
+        option_pool = pool_by_option.get(index, 0)
+        pct = int(round((option_pool / total_pool) * 100)) if total_pool else 0
+        option_lines.append(f"{option}: {option_pool} Stars ({pct}%)")
+
+    lines = [
+        f"Poolr market #{market.id}",
+        "",
+        market.question,
+        "",
+        f"Pool: {total_pool} Stars",
+        f"Min stake: {market.min_bet} Stars",
+        f"Deadline: {deadline}",
+    ]
+    if option_lines:
+        lines.extend(["", *option_lines])
+    return "\n".join(lines)
+
+
+def build_market_url(mini_app_url: str | None, market_id: int) -> str | None:
+    if not mini_app_url:
+        return None
+    parsed = urlparse(mini_app_url)
+    parameter = f"startapp=market_{market_id}" if parsed.netloc.lower() in {"t.me", "telegram.me"} else f"market_id={market_id}"
+    separator = "&" if "?" in mini_app_url else "?"
+    return f"{mini_app_url}{separator}{parameter}"
+
+
+def build_market_keyboard(
+    market_id: int,
+    options: list[str],
+    status: MarketStatus,
+    mini_app_url: str | None = None,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if status == MarketStatus.ACTIVE:
+        for index, option in enumerate(options):
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{option}",
+                        callback_data=f"bet:{market_id}:{index}",
+                    )
+                ]
+            )
+
+    market_url = build_market_url(mini_app_url, market_id)
+    if market_url:
+        rows.append([InlineKeyboardButton(text="Open event", url=market_url)])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_inline_market_result(
+    market: Market,
+    pool_by_option: dict[int, int],
+    mini_app_url: str | None = None,
+) -> InlineQueryResultArticle:
+    return InlineQueryResultArticle(
+        id=f"market:{market.id}",
+        title=market.question,
+        description=f"Yes/No market, min {market.min_bet} Star",
+        input_message_content=InputTextMessageContent(
+            message_text=build_inline_market_text(market, pool_by_option),
+        ),
+        reply_markup=build_market_keyboard(
+            market_id=market.id,
+            options=market.options,
+            status=market.status,
+            mini_app_url=mini_app_url,
+        ),
+    )
+
+
+def build_inline_market_preview_result(
+    question: str,
+    mini_app_url: str | None = None,
+    *,
+    options_key: str = "yn",
+    options: list[str] | None = None,
+    duration: timedelta = INLINE_DEFAULT_DURATION,
+) -> InlineQueryResultArticle:
+    question = _validate_question(question)
+    options = _validate_options(options or INLINE_OPTION_PRESETS[options_key])
+    duration = _validate_inline_duration(duration)
+    duration_label = _inline_duration_label(duration)
+    return InlineQueryResultArticle(
+        id=_inline_draft_result_id(question, options_key, duration),
+        title=f"{_inline_options_label(options)} · {duration_label}",
+        description=(
+            f"{question} · {len(options)} answers: {', '.join(options[:3])}"
+            f"{'...' if len(options) > 3 else ''}"
+        ),
+        input_message_content=InputTextMessageContent(
+            message_text=build_inline_market_preview_text(question, options, duration),
+        ),
+        reply_markup=build_inline_preview_keyboard(mini_app_url),
+    )
+
+
+def build_inline_market_preview_results(
+    draft: InlineMarketDraft,
+    mini_app_url: str | None = None,
+) -> list[InlineQueryResultArticle]:
+    question = draft.question
+    selected_duration = draft.duration or INLINE_DEFAULT_DURATION
+    results: list[InlineQueryResultArticle] = []
+
+    if draft.options is not None:
+        for duration in _unique_durations((selected_duration, *[item[1] for item in INLINE_DURATION_CHOICES])):
+            results.append(
+                build_inline_market_preview_result(
+                    question,
+                    mini_app_url=mini_app_url,
+                    options_key="custom",
+                    options=draft.options,
+                    duration=duration,
+                )
+            )
+        return results
+
+    for duration in _unique_durations((selected_duration, *[item[1] for item in INLINE_DURATION_CHOICES])):
+        results.append(
+            build_inline_market_preview_result(
+                question,
+                mini_app_url=mini_app_url,
+                options_key="yn",
+                options=INLINE_OPTION_PRESETS["yn"],
+                duration=duration,
+            )
+        )
+
+    for options_key in ("ynm", "abc4", "abc5", "abc6"):
+        results.append(
+            build_inline_market_preview_result(
+                question,
+                mini_app_url=mini_app_url,
+                options_key=options_key,
+                options=INLINE_OPTION_PRESETS[options_key],
+                duration=selected_duration,
+            )
+        )
+    return results
+
+
+def build_inline_market_preview_text(
+    question: str,
+    options: list[str] | None = None,
+    duration: timedelta = INLINE_DEFAULT_DURATION,
+) -> str:
+    question = _validate_question(question)
+    options = _validate_options(options or DEFAULT_OPTIONS)
+    return "\n".join(
+        [
+            "Poolr market",
+            "",
+            question,
+            "",
+            f"Answers: {', '.join(options)}",
+            f"Closes in: {_inline_duration_label(duration)}",
+            "",
+            "Creating market...",
+        ]
+    )
+
+
+def build_inline_preview_keyboard(_mini_app_url: str | None = None) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Creating...", callback_data="inline_market_pending")]]
+    )
+
+
+async def publish_market_card(
+    bot: Bot,
+    chat_id: int,
+    market: Market,
+    pool_by_option: dict[int, int],
+    mini_app_url: str | None = None,
+) -> Message:
+    logger.info("Publishing market card: market_id=%d chat_id=%d", market.id, chat_id)
+    try:
+        return await send_market_card_photo(
+            bot,
+            chat_id,
+            market,
+            pool_by_option,
+            build_market_keyboard(
+                market_id=market.id,
+                options=market.options,
+                status=market.status,
+                mini_app_url=mini_app_url,
+            ),
+            fallback_text=build_market_card_text(market, pool_by_option),
+        )
+    except Exception as exc:
+        logger.exception("Failed to publish market card: market_id=%d chat_id=%d", market.id, chat_id)
+        raise MarketCreationPersistenceError("Failed to publish market card") from exc
+
+
+async def update_market_card(
+    bot: Bot,
+    chat_id: int,
+    message_id: int,
+    market: Market,
+    pool_by_option: dict[int, int],
+    mini_app_url: str | None = None,
+) -> None:
+    logger.info(
+        "Updating market card: market_id=%d chat_id=%d message_id=%d",
+        market.id,
+        chat_id,
+        message_id,
+    )
+    try:
+        await update_market_card_photo(
+            bot,
+            chat_id=chat_id,
+            message_id=message_id,
+            market=market,
+            pool_by_option=pool_by_option,
+            reply_markup=build_market_keyboard(
+                market_id=market.id,
+                options=market.options,
+                status=market.status,
+                mini_app_url=mini_app_url,
+            ),
+            fallback_text=build_market_card_text(market, pool_by_option),
+        )
+    except Exception as exc:
+        logger.exception("Failed to update market card: market_id=%d", market.id)
+        raise MarketCreationPersistenceError("Failed to update market card") from exc
+
+
+async def update_inline_market_card(
+    bot: Bot,
+    inline_message_id: str,
+    market: Market,
+    pool_by_option: dict[int, int],
+    mini_app_url: str | None = None,
+) -> None:
+    logger.info(
+        "Updating inline market card: market_id=%d inline_message_id_set=%s",
+        market.id,
+        bool(inline_message_id),
+    )
+    try:
+        await bot.edit_message_text(
+            inline_message_id=inline_message_id,
+            text=build_inline_market_text(market, pool_by_option),
+            reply_markup=build_market_keyboard(
+                market_id=market.id,
+                options=market.options,
+                status=market.status,
+                mini_app_url=mini_app_url,
+            ),
+        )
+    except Exception as exc:
+        logger.exception("Failed to update inline market card: market_id=%d", market.id)
+        raise MarketCreationPersistenceError("Failed to update inline market card") from exc
+
+
+def _message_text(message: Message) -> str:
+    if not isinstance(message.text, str) or not message.text.strip():
+        raise MarketCreationValidationError("Please send text.")
+    return message.text.strip()
+
+
+def _validate_question(question: str) -> str:
+    question = " ".join(question.strip().split())
+    if not question:
+        raise MarketCreationValidationError("Question cannot be empty.")
+    if len(question) > MAX_QUESTION_LENGTH:
+        raise MarketCreationValidationError("Question is too long. Keep it under 200 characters.")
+    return question
+
+
+def _validate_options(value: object) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(option, str) for option in value):
+        raise MarketCreationValidationError("Options are missing or invalid.")
+
+    options = [" ".join(option.strip().split()) for option in value if option.strip()]
+    if len(options) < 2 or len(options) > 6:
+        raise MarketCreationValidationError("Send 2-6 options.")
+    if any(len(option) > 64 for option in options):
+        raise MarketCreationValidationError("Each option must be 64 characters or less.")
+    return options
+
+
+def _parse_deadline_from_state(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise MarketCreationValidationError("Deadline is missing.")
+    try:
+        deadline = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise MarketCreationValidationError("Deadline is invalid.") from exc
+    if deadline.tzinfo is None or deadline.utcoffset() is None:
+        raise MarketCreationValidationError("Deadline must be timezone-aware.")
+    return deadline
+
+
+def _parse_min_bet(value: str) -> int:
+    try:
+        min_bet = int(value.strip())
+    except ValueError as exc:
+        raise MarketCreationValidationError("Minimum stake must be a whole number.") from exc
+    if min_bet < 1:
+        raise MarketCreationValidationError("Minimum stake must be at least 1 Star.")
+    return min_bet
+
+
+def _format_deadline(deadline: datetime) -> str:
+    return deadline.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _parse_inline_result_market_id(result_id: str) -> int | None:
+    prefix = "market:"
+    if not result_id.startswith(prefix):
+        return None
+    raw_market_id = result_id[len(prefix) :]
+    if not raw_market_id.isdigit():
+        return None
+    return int(raw_market_id)
+
+
+def _inline_draft_result_id(question: str, options_key: str, duration: timedelta) -> str:
+    duration_minutes = _duration_minutes(duration)
+    digest = sha256(f"{question}|{options_key}|{duration_minutes}".encode("utf-8")).hexdigest()[:24]
+    return f"{INLINE_DRAFT_PREFIX}:{options_key}:{duration_minutes}:{digest}"
+
+
+def _parse_inline_draft_result_id(result_id: str) -> tuple[str, int] | None:
+    parts = result_id.split(":")
+    if len(parts) != 4 or parts[0] != INLINE_DRAFT_PREFIX:
+        return None
+    options_key = parts[1]
+    if options_key != "custom" and options_key not in INLINE_OPTION_PRESETS:
+        return None
+    try:
+        duration_minutes = int(parts[2])
+    except ValueError:
+        return None
+    return options_key, duration_minutes
+
+
+def _resolve_inline_draft_options(options_key: str, draft: InlineMarketDraft) -> list[str]:
+    if options_key == "custom":
+        if draft.options is None:
+            raise MarketCreationValidationError("Custom options are missing.")
+        return _validate_options(draft.options)
+    return _validate_options(INLINE_OPTION_PRESETS[options_key])
+
+
+def _resolve_inline_draft_duration(duration_minutes: int) -> timedelta:
+    return _validate_inline_duration(timedelta(minutes=duration_minutes))
+
+
+def _validate_inline_duration(duration: timedelta) -> timedelta:
+    if duration < MIN_MARKET_DURATION or duration > MAX_MARKET_DURATION:
+        raise MarketCreationValidationError("Deadline must be between 15m and 7d.")
+    return duration
+
+
+def _duration_minutes(duration: timedelta) -> int:
+    return int(duration.total_seconds() // 60)
+
+
+def _inline_duration_label(duration: timedelta) -> str:
+    for label, choice in INLINE_DURATION_CHOICES:
+        if choice == duration:
+            return label
+    minutes = _duration_minutes(duration)
+    if minutes % (24 * 60) == 0:
+        return f"{minutes // (24 * 60)}d"
+    if minutes % 60 == 0:
+        return f"{minutes // 60}h"
+    return f"{minutes}m"
+
+
+def _inline_options_label(options: list[str]) -> str:
+    if options == DEFAULT_OPTIONS:
+        return "Yes/No"
+    if len(options) <= 3:
+        return "/".join(options)
+    return f"{len(options)} answers"
+
+
+def _unique_durations(durations: tuple[timedelta, ...]) -> list[timedelta]:
+    seen: set[int] = set()
+    unique: list[timedelta] = []
+    for duration in durations:
+        duration = _validate_inline_duration(duration)
+        minutes = _duration_minutes(duration)
+        if minutes in seen:
+            continue
+        seen.add(minutes)
+        unique.append(duration)
+    return unique

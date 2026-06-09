@@ -1,0 +1,5 @@
+ALTER TABLE markets
+    ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+
+ALTER TABLE disputes
+    ADD COLUMN IF NOT EXISTS resolution_note TEXT;
