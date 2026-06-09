@@ -1110,6 +1110,34 @@ button:disabled {
   text-align: center;
 }
 
+.language-switcher {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 20px;
+  padding: 6px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 2px solid rgba(214, 230, 239, 0.9);
+}
+
+.language-switcher button {
+  min-height: 42px;
+  border-radius: 14px;
+  color: var(--navy);
+  background: transparent;
+  font-size: 15px;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+.language-switcher button.active {
+  color: #ffffff;
+  background: linear-gradient(180deg, var(--blue-2), var(--blue-3));
+}
+
 .disclaimer-list {
   position: relative;
   z-index: 2;

@@ -3,92 +3,281 @@
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
   const onboardingKey = "poolr:onboarding:v1";
   const walletKey = "poolr:wallet:v1";
+  const languageKey = "poolr:language:v1";
   const params = new URLSearchParams(window.location.search);
   const hasTelegramAuth = Boolean(tg && tg.initData);
   const targetMarketId = resolveTargetMarketId();
   let noticeTimer = null;
 
-  const demoMarkets = [
-    {
-      id: 1001,
-      question: "Will Poolr reach 100 markets?",
-      options: ["Yes", "No"],
-      status: "active",
-      total_pool: 242,
-      min_bet: 5,
-      bets_count: 31,
-      pool_by_option: { 0: 176, 1: 66 },
-      odds: { 0: 0.7273, 1: 0.2727 },
-      deadline: new Date(Date.now() + 1000 * 60 * 60 * 7).toISOString(),
-      created_at: new Date(Date.now() - 1000 * 60 * 31).toISOString(),
+  const translations = {
+    en: {
+      appTitle: "Poolr Mini App",
+      loading: "Loading mini app",
+      groupPredictionMarkets: "Group prediction markets",
+      stakedAcross: "Staked across live and resolved markets",
+      markets: "Markets",
+      launches: (count) => `${count} launches`,
+      byStars: "By Stars",
+      new: "New",
+      active: "Active",
+      resolved: "Resolved",
+      noMarketsTitle: "No markets yet",
+      noMarketsBody: "Create one from a Telegram group with /bet or @pooolr_bot.",
+      wallet: "Wallet",
+      activity: "Activity",
+      connectOnce: "Connect once, then receive beta payouts.",
+      walletReady: "Wallet ready",
+      walletConnected: "Wallet connected",
+      tonWallet: "TON wallet",
+      manualPayouts: "Manual TON-equivalent payouts",
+      address: "Address",
+      pasteWalletHint: "Paste a TON wallet address before requesting payout.",
+      copyAddress: "Copy address",
+      openWallet: "Open @wallet",
+      withdrawable: "Withdrawable",
+      pending: "Pending",
+      tonWalletField: "TON wallet",
+      withdrawStars: "Withdraw Stars",
+      requestPayout: "Request payout",
+      createRequest: "Creating request",
+      addStars: "Add Stars",
+      sendInvoice: "Send invoice",
+      sendingInvoice: "Sending invoice",
+      totalStaked: "Total staked",
+      totalWon: "Total won",
+      yourStakes: "Your stakes, wins, and payout requests.",
+      refresh: "Refresh",
+      marketStake: "Market stake",
+      payoutRequest: "Payout request",
+      open: "Open",
+      closed: "Closed",
+      refunded: "Refunded",
+      disputed: "Disputed",
+      paid: "Paid",
+      rejected: "Rejected",
+      now: "Now",
+      createFromChat: "Create a market from any chat for free",
+      stakeStars: "Stake Stars before anyone else",
+      betaPayouts: "Beta payouts are reviewed",
+      disclaimer1: "Prediction markets can be risky. Stake only what you can afford.",
+      disclaimer2: "Winnings accrue in Stars units before TON-equivalent payout review.",
+      disclaimer3: "Use Poolr only where local rules allow this kind of market.",
+      next: "Next",
+      lfg: "LFG",
+      marketOpen: "This market is not accepting stakes.",
+      previewInvoice: "Preview mode: Telegram will send a Stars invoice here.",
+      previewTopup: "Preview mode: a Stars top-up invoice appears in Telegram.",
+      previewPayout: "Preview mode: payout request would be sent for review.",
+      walletSaved: "Wallet saved.",
+      pasteWalletFirst: "Paste a TON wallet address first.",
+      copyFirst: "Paste a TON wallet address first.",
+      copied: "Wallet address copied.",
+      poolrUpToDate: "Poolr is up to date.",
+      betSent: "Stars invoice sent. Updating after payment.",
+      invoiceWait: "Invoice sent. Tap refresh if the pool still looks old.",
+      depositSent: "Stars invoice sent.",
+      requestCreated: "Payout request created.",
+      couldNotSendInvoice: "Could not send Stars invoice.",
+      couldNotSendDeposit: "Could not send deposit invoice.",
+      couldNotCreateRequest: "Could not create payout request.",
+      betRecorded: "Bet recorded.",
+      selected: "Selected",
+      currentPool: "Current pool",
+      estimatedReturn: "Estimated return",
+      minimum: "Minimum",
+      payWithStars: "Pay with Stars",
+      cancel: "Cancel",
+      to: "to",
+      answerPreview: "Creating market...",
+      answers: "Answers",
+      closesIn: "Closes in",
+      creating: "Creating...",
+      activeShort: "Open",
+      sortMarkets: "Sort markets",
+      filterMarkets: "Filter markets",
+      stakeAmount: "Stake amount",
+      bet: "bets",
+      stars: "Stars",
+      dealsLive: "Staked across live and resolved markets",
+      previewMode: "Preview mode is on. Open inside Telegram to send invoices.",
+      notChatAvailable: "Create one from a Telegram group with /bet or @pooolr_bot.",
+      langRu: "RU",
+      langEn: "EN",
+      language: "Language",
+      bonus: "Beta payouts are reviewed",
+      yesNo: "Yes/No",
+      maybe: "Maybe",
+      openEvent: "Open event",
+      yesNoMaybe: "Yes/No/Maybe",
+      marketsCount: (count) => `${count} launches`,
+      activeCount: (count) => `${count} active`,
+      resolvedCount: (count) => `${count} resolved`,
+      marketClosed: "This market is not accepting stakes.",
+      sendText: "Send the market question, up to 200 characters.",
+      sendOptions: "Send 2-6 options, separated by commas or new lines.",
+      sendDeadline: "Send a deadline: 15m, 45m, 2h, 1d, up to 7d.",
+      sendMinBet: "Send the minimum stake in Stars, at least 1.",
+      invalidDeadline: "Invalid deadline. Use 15m-7d, for example 45m, 2h, or 1d.",
+      previewHelp: "Type a question after @pooolr_bot",
+      marketCouldNotOpen: "Could not open this market.",
+      emptyActivity: "No activity yet",
+      emptyActivityBody: "Your market stakes and payout requests will land here.",
+      statusLabels: {
+        active: "Open",
+        closed: "Closed",
+        resolved: "Resolved",
+        cancelled: "Refunded",
+        disputed: "Disputed",
+        pending: "Pending",
+        completed: "Paid",
+        failed: "Rejected",
+      },
+      onboardingSlides: [
+        { title: "Create a market from any chat for free" },
+        { title: "Stake Stars before anyone else" },
+        { title: "Beta payouts are reviewed" },
+      ],
     },
-    {
-      id: 1002,
-      question: "Will tonight's match go to extra time?",
-      options: ["Yes", "No"],
-      status: "active",
-      total_pool: 97,
-      min_bet: 3,
-      bets_count: 14,
-      pool_by_option: { 0: 42, 1: 55 },
-      odds: { 0: 0.433, 1: 0.567 },
-      deadline: new Date(Date.now() + 1000 * 60 * 60 * 2).toISOString(),
-      created_at: new Date(Date.now() - 1000 * 60 * 76).toISOString(),
-    },
-    {
-      id: 1003,
-      question: "Will the next feature ship before Friday?",
-      options: ["Ships", "Slips"],
-      status: "resolved",
-      winning_option: 0,
-      total_pool: 338,
-      min_bet: 10,
-      bets_count: 46,
-      pool_by_option: { 0: 214, 1: 124 },
-      odds: { 0: 0.6331, 1: 0.3669 },
-      deadline: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(),
-      resolved_at: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
-      created_at: new Date(Date.now() - 1000 * 60 * 60 * 19).toISOString(),
-    },
-  ];
-
-  const demoProfile = {
-    user_id: 0,
-    username: "preview",
-    first_name: "Poolr",
-    balance: 0,
-    stats: {
-      bets_count: 12,
-      markets_created: 4,
-      total_staked: 420,
-      total_won: 628,
-      pending_withdrawals: 1,
+    ru: {
+      appTitle: "Poolr Mini App",
+      loading: "Загрузка мини-приложения",
+      groupPredictionMarkets: "Групповые прогнозные рынки",
+      stakedAcross: "Сумма по активным и завершённым рынкам",
+      markets: "Рынки",
+      launches: (count) => `${count} запусков`,
+      byStars: "По Stars",
+      new: "Новые",
+      active: "Активные",
+      resolved: "Завершённые",
+      noMarketsTitle: "Пока нет рынков",
+      noMarketsBody: "Создай рынок из любого чата через /bet или @pooolr_bot.",
+      wallet: "Кошелёк",
+      activity: "Активность",
+      connectOnce: "Подключи один раз и получай beta-выплаты.",
+      walletReady: "Кошелёк готов",
+      walletConnected: "Кошелёк подключён",
+      tonWallet: "TON-кошелёк",
+      manualPayouts: "Ручные выплаты в эквиваленте TON",
+      address: "Адрес",
+      pasteWalletHint: "Вставь TON-адрес кошелька перед запросом выплаты.",
+      copyAddress: "Скопировать адрес",
+      openWallet: "Открыть @wallet",
+      withdrawable: "Доступно к выводу",
+      pending: "В ожидании",
+      tonWalletField: "TON-кошелёк",
+      withdrawStars: "Вывести Stars",
+      requestPayout: "Запросить выплату",
+      createRequest: "Создание запроса",
+      addStars: "Добавить Stars",
+      sendInvoice: "Отправить счёт",
+      sendingInvoice: "Отправка счёта",
+      totalStaked: "Всего поставлено",
+      totalWon: "Всего выиграно",
+      yourStakes: "Твои ставки, выигрыши и запросы на выплату.",
+      refresh: "Обновить",
+      marketStake: "Ставка на рынок",
+      payoutRequest: "Запрос на выплату",
+      open: "Открыт",
+      closed: "Закрыт",
+      refunded: "Возврат",
+      disputed: "Спор",
+      paid: "Выплачено",
+      rejected: "Отклонено",
+      now: "Сейчас",
+      createFromChat: "Создавай рынок из любого чата бесплатно",
+      stakeStars: "Ставь Stars раньше всех",
+      betaPayouts: "Beta-выплаты проходят проверку",
+      disclaimer1: "Прогнозные рынки могут быть рискованными. Ставь только то, что готов потерять.",
+      disclaimer2: "Выигрыши накапливаются в Stars до ручной TON-эквивалентной выплаты.",
+      disclaimer3: "Используй Poolr только там, где это разрешено местными правилами.",
+      next: "Дальше",
+      lfg: "Поехали",
+      marketOpen: "Этот рынок больше не принимает ставки.",
+      previewInvoice: "Режим предпросмотра: в Telegram здесь появится счёт Stars.",
+      previewTopup: "Режим предпросмотра: счёт на пополнение появится в Telegram.",
+      previewPayout: "Режим предпросмотра: запрос на выплату уйдёт на проверку.",
+      walletSaved: "Адрес сохранён.",
+      pasteWalletFirst: "Сначала вставь TON-адрес кошелька.",
+      copyFirst: "Сначала вставь TON-адрес кошелька.",
+      copied: "Адрес кошелька скопирован.",
+      poolrUpToDate: "Poolr уже обновлён.",
+      betSent: "Счёт Stars отправлен. Обновим после оплаты.",
+      invoiceWait: "Счёт отправлен. Нажми обновить, если пул ещё не поменялся.",
+      depositSent: "Счёт Stars отправлен.",
+      requestCreated: "Запрос на выплату создан.",
+      couldNotSendInvoice: "Не удалось отправить счёт Stars.",
+      couldNotSendDeposit: "Не удалось отправить счёт на пополнение.",
+      couldNotCreateRequest: "Не удалось создать запрос на выплату.",
+      betRecorded: "Ставка записана.",
+      selected: "Выбрано",
+      currentPool: "Текущий пул",
+      estimatedReturn: "Оценка выплаты",
+      minimum: "Минимум",
+      payWithStars: "Оплатить Stars",
+      cancel: "Отмена",
+      to: "для",
+      answerPreview: "Создание рынка...",
+      answers: "Ответы",
+      closesIn: "Экспирация",
+      creating: "Создание...",
+      activeShort: "Открыт",
+      sortMarkets: "Сортировка",
+      filterMarkets: "Фильтр",
+      stakeAmount: "Размер ставки",
+      bet: "ставок",
+      stars: "Stars",
+      dealsLive: "Сумма по активным и завершённым рынкам",
+      previewMode: "Режим предпросмотра включён. Открой внутри Telegram, чтобы отправлять счета.",
+      notChatAvailable: "Создай рынок из любого чата через /bet или @pooolr_bot.",
+      langRu: "RU",
+      langEn: "EN",
+      language: "Язык",
+      bonus: "Beta-выплаты проходят проверку",
+      yesNo: "Да/Нет",
+      maybe: "Возможно",
+      openEvent: "Открыть событие",
+      yesNoMaybe: "Да/Нет/Возможно",
+      marketsCount: (count) => `${count} запусков`,
+      activeCount: (count) => `${count} активных`,
+      resolvedCount: (count) => `${count} завершённых`,
+      marketClosed: "Этот рынок больше не принимает ставки.",
+      sendText: "Отправь вопрос рынка, до 200 символов.",
+      sendOptions: "Отправь 2-6 вариантов через запятую или с новой строки.",
+      sendDeadline: "Отправь срок: 15m, 45m, 2h, 1d, до 7d.",
+      sendMinBet: "Отправь минимальную ставку в Stars, не меньше 1.",
+      invalidDeadline: "Неверный срок. Используй 15m-7d, например 45m, 2h или 1d.",
+      previewHelp: "Напиши вопрос после @pooolr_bot",
+      marketCouldNotOpen: "Не удалось открыть этот рынок.",
+      emptyActivity: "Пока нет активности",
+      emptyActivityBody: "Твои ставки и запросы на выплаты появятся здесь.",
+      statusLabels: {
+        active: "Открыт",
+        closed: "Закрыт",
+        resolved: "Завершён",
+        cancelled: "Возврат",
+        disputed: "Спор",
+        pending: "В ожидании",
+        completed: "Выплачено",
+        failed: "Отклонено",
+      },
+      onboardingSlides: [
+        { title: "Создавай рынок из любого чата бесплатно" },
+        { title: "Ставь Stars раньше всех" },
+        { title: "Beta-выплаты проходят проверку" },
+      ],
     },
   };
 
-  const demoBets = [
-    {
-      id: 501,
-      market_id: 1001,
-      option_index: 0,
-      stars_amount: 25,
-      created_at: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
-      market: demoMarkets[0],
-    },
-    {
-      id: 502,
-      market_id: 1003,
-      option_index: 0,
-      stars_amount: 50,
-      created_at: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString(),
-      market: demoMarkets[2],
-    },
-  ];
+  const currentLanguage = detectLanguage();
+  const demoMarkets = buildDemoMarkets(currentLanguage);
+  const demoProfile = buildDemoProfile(currentLanguage);
+  const demoBets = buildDemoBets(demoMarkets);
 
   const state = {
     ready: false,
     loading: true,
     usingDemo: !hasTelegramAuth,
+    language: currentLanguage,
     view: "markets",
     sort: "stars",
     filter: "active",
@@ -161,6 +350,170 @@
     return match ? match[1] : "";
   }
 
+  function detectLanguage() {
+    const saved = safeStorageGet(languageKey);
+    if (saved === "ru" || saved === "en") {
+      return saved;
+    }
+    const telegramCode = String(tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.language_code : "").toLowerCase();
+    if (telegramCode.startsWith("ru")) {
+      return "ru";
+    }
+    const browserCode = String(navigator.language || navigator.userLanguage || "").toLowerCase();
+    if (browserCode.startsWith("ru")) {
+      return "ru";
+    }
+    return "en";
+  }
+
+  function setLanguage(language) {
+    const next = language === "ru" ? "ru" : "en";
+    state.language = next;
+    safeStorageSet(languageKey, next);
+    document.documentElement.lang = next;
+    render();
+  }
+
+  function currentLocale() {
+    return state.language === "ru" ? "ru-RU" : "en-US";
+  }
+
+  function t(key, ...args) {
+    const table = translations[state.language] || translations.en;
+    const value = key.split(".").reduce((acc, part) => (acc && acc[part] !== undefined ? acc[part] : undefined), table);
+    if (typeof value === "function") {
+      return value(...args);
+    }
+    return value !== undefined ? value : key;
+  }
+
+  function buildDemoMarkets(language) {
+    const en = [
+      {
+        id: 1001,
+        question: "Will Poolr reach 100 markets?",
+        options: ["Yes", "No"],
+        status: "active",
+        total_pool: 242,
+        min_bet: 5,
+        bets_count: 31,
+        pool_by_option: { 0: 176, 1: 66 },
+        odds: { 0: 0.7273, 1: 0.2727 },
+        deadline: new Date(Date.now() + 1000 * 60 * 60 * 7).toISOString(),
+        created_at: new Date(Date.now() - 1000 * 60 * 31).toISOString(),
+      },
+      {
+        id: 1002,
+        question: "Will tonight's match go to extra time?",
+        options: ["Yes", "No"],
+        status: "active",
+        total_pool: 97,
+        min_bet: 3,
+        bets_count: 14,
+        pool_by_option: { 0: 42, 1: 55 },
+        odds: { 0: 0.433, 1: 0.567 },
+        deadline: new Date(Date.now() + 1000 * 60 * 60 * 2).toISOString(),
+        created_at: new Date(Date.now() - 1000 * 60 * 76).toISOString(),
+      },
+      {
+        id: 1003,
+        question: "Will the next feature ship before Friday?",
+        options: ["Ships", "Slips"],
+        status: "resolved",
+        winning_option: 0,
+        total_pool: 338,
+        min_bet: 10,
+        bets_count: 46,
+        pool_by_option: { 0: 214, 1: 124 },
+        odds: { 0: 0.6331, 1: 0.3669 },
+        deadline: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(),
+        resolved_at: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
+        created_at: new Date(Date.now() - 1000 * 60 * 60 * 19).toISOString(),
+      },
+    ];
+    const ru = [
+      {
+        id: 1001,
+        question: "Достигнет ли Poolr 100 рынков?",
+        options: ["Да", "Нет"],
+        status: "active",
+        total_pool: 242,
+        min_bet: 5,
+        bets_count: 31,
+        pool_by_option: { 0: 176, 1: 66 },
+        odds: { 0: 0.7273, 1: 0.2727 },
+        deadline: new Date(Date.now() + 1000 * 60 * 60 * 7).toISOString(),
+        created_at: new Date(Date.now() - 1000 * 60 * 31).toISOString(),
+      },
+      {
+        id: 1002,
+        question: "Уйдёт ли сегодняшний матч в овертайм?",
+        options: ["Да", "Нет"],
+        status: "active",
+        total_pool: 97,
+        min_bet: 3,
+        bets_count: 14,
+        pool_by_option: { 0: 42, 1: 55 },
+        odds: { 0: 0.433, 1: 0.567 },
+        deadline: new Date(Date.now() + 1000 * 60 * 60 * 2).toISOString(),
+        created_at: new Date(Date.now() - 1000 * 60 * 76).toISOString(),
+      },
+      {
+        id: 1003,
+        question: "Выйдет ли следующая фича до пятницы?",
+        options: ["Выйдет", "Опоздает"],
+        status: "resolved",
+        winning_option: 0,
+        total_pool: 338,
+        min_bet: 10,
+        bets_count: 46,
+        pool_by_option: { 0: 214, 1: 124 },
+        odds: { 0: 0.6331, 1: 0.3669 },
+        deadline: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(),
+        resolved_at: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
+        created_at: new Date(Date.now() - 1000 * 60 * 60 * 19).toISOString(),
+      },
+    ];
+    return language === "ru" ? ru : en;
+  }
+
+  function buildDemoProfile(language) {
+    return {
+      user_id: 0,
+      username: "preview",
+      first_name: language === "ru" ? "Пользователь" : "Poolr",
+      balance: 0,
+      stats: {
+        bets_count: 12,
+        markets_created: 4,
+        total_staked: 420,
+        total_won: 628,
+        pending_withdrawals: 1,
+      },
+    };
+  }
+
+  function buildDemoBets(markets) {
+    return [
+      {
+        id: 501,
+        market_id: 1001,
+        option_index: 0,
+        stars_amount: 25,
+        created_at: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
+        market: markets[0],
+      },
+      {
+        id: 502,
+        market_id: 1003,
+        option_index: 0,
+        stars_amount: 50,
+        created_at: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString(),
+        market: markets[2],
+      },
+    ];
+  }
+
   async function loadData() {
     if (!hasTelegramAuth) {
       state.loading = false;
@@ -187,7 +540,7 @@
     } catch (error) {
       console.warn("Mini App API fallback enabled", error);
       state.usingDemo = true;
-      showNotice("Preview mode is on. Open inside Telegram to send invoices.");
+      showNotice(t("previewMode"));
     } finally {
       state.loading = false;
       state.ready = true;
@@ -209,7 +562,7 @@
         }
       } catch (error) {
         console.warn("Could not open linked market", error);
-        showNotice("Could not open this market.");
+        showNotice(t("marketCouldNotOpen"));
         return;
       }
     }
@@ -266,6 +619,8 @@
   }
 
   function render() {
+    document.documentElement.lang = state.language;
+    document.title = t("appTitle");
     if (state.showOnboarding) {
       renderOnboarding();
       return;
@@ -298,6 +653,10 @@
             <img class="onboarding-asset" src="${slide.art}" alt="" aria-hidden="true" />
           </div>
           <h1 class="onboarding-title">${escapeHtml(slide.title)}</h1>
+          <div class="language-switcher" role="tablist" aria-label="${escapeAttr(t("language"))}">
+            <button type="button" class="${state.language === "ru" ? "active" : ""}" data-language="ru">${escapeHtml(t("langRu"))}</button>
+            <button type="button" class="${state.language === "en" ? "active" : ""}" data-language="en">${escapeHtml(t("langEn"))}</button>
+          </div>
           ${
             slide.disclaimers.length
               ? `<ul class="disclaimer-list">${slide.disclaimers
@@ -315,7 +674,7 @@
                 .join("")}
             </div>
             <button class="primary-btn onboarding-btn" type="button" data-next-onboarding>
-              ${isLast ? "LFG" : "Next"}
+              ${isLast ? t("lfg") : t("next")}
             </button>
           </div>
         </section>
@@ -340,30 +699,30 @@
             <div class="round-badge">${formatNumber(state.profile.balance || 0)}</div>
           </div>
           <div class="hero-copy">
-            <p>Group prediction markets</p>
+            <p>${escapeHtml(t("groupPredictionMarkets"))}</p>
             <strong>${formatNumber(volume)} Stars</strong>
-            <span>Staked across live and resolved markets</span>
+            <span>${escapeHtml(t("stakedAcross"))}</span>
           </div>
           <div class="hero-stats">
             <div class="stat-glass">
               <strong>${activeCount}</strong>
-              <span>Active</span>
+              <span>${escapeHtml(t("active"))}</span>
             </div>
             <div class="stat-glass">
               <strong>${resolvedCount}</strong>
-              <span>Resolved</span>
+              <span>${escapeHtml(t("resolved"))}</span>
             </div>
           </div>
         </section>
 
         <div class="toolbar-row">
           <div class="section-heading">
-            <h2>Markets</h2>
-            <p>${state.loading ? "Syncing" : `${state.markets.length} launches`}</p>
+            <h2>${escapeHtml(t("markets"))}</h2>
+            <p>${state.loading ? "…" : t("launches", state.markets.length)}</p>
           </div>
           <div class="pill-toggle" role="tablist" aria-label="Sort markets">
-            <button type="button" class="${state.sort === "stars" ? "active" : ""}" data-sort="stars">By Stars</button>
-            <button type="button" class="${state.sort === "new" ? "active" : ""}" data-sort="new">New</button>
+            <button type="button" class="${state.sort === "stars" ? "active" : ""}" data-sort="stars">${escapeHtml(t("byStars"))}</button>
+            <button type="button" class="${state.sort === "new" ? "active" : ""}" data-sort="new">${escapeHtml(t("new"))}</button>
           </div>
         </div>
 
@@ -371,9 +730,7 @@
           ${["active", "resolved", "all"]
             .map(
               (filter) =>
-                `<button type="button" class="${state.filter === filter ? "active" : ""}" data-filter="${filter}">${capitalize(
-                  filter,
-                )}</button>`,
+                `<button type="button" class="${state.filter === filter ? "active" : ""}" data-filter="${filter}">${escapeHtml(filter === "all" ? (state.language === "ru" ? "Все" : "All") : t(filter))}</button>`,
             )
             .join("")}
         </div>
@@ -382,7 +739,7 @@
           ${
             markets.length
               ? markets.map((market, index) => marketCard(market, index)).join("")
-              : emptyCard("No markets yet", "Create one from a Telegram group with /bet or @pooolr_bot.")
+              : emptyCard(t("noMarketsTitle"), t("noMarketsBody"))
           }
         </section>
       </main>
@@ -392,15 +749,15 @@
   function walletView() {
     const address = state.walletAddress.trim();
     const hasAddress = Boolean(address);
-    const short = hasAddress ? shortenAddress(address) : "Connect wallet";
+    const short = hasAddress ? shortenAddress(address) : t("openWallet");
     const pendingWithdrawals = state.withdrawals.filter((withdrawal) => withdrawal.status === "pending").length;
 
     return `
       <main class="view">
         <div class="view-title-row">
           <div class="title-block">
-            <h1>Wallet</h1>
-            <p>Connect once, then receive beta payouts.</p>
+            <h1>${escapeHtml(t("wallet"))}</h1>
+            <p>${escapeHtml(t("connectOnce"))}</p>
           </div>
         </div>
 
@@ -408,38 +765,38 @@
           <div class="wallet-head">
             <div class="wallet-icon-box">${walletIcon()}</div>
             <div>
-              <h2>${hasAddress ? "Wallet connected" : "Wallet ready"}</h2>
-              <p>${hasAddress ? "TON wallet" : "Manual TON-equivalent payouts"}</p>
+              <h2>${hasAddress ? t("walletConnected") : t("walletReady")}</h2>
+              <p>${hasAddress ? t("tonWallet") : t("manualPayouts")}</p>
             </div>
           </div>
 
           <div class="address-card">
-            <span class="label">Address</span>
+            <span class="label">${escapeHtml(t("address"))}</span>
             <strong class="address-large">${escapeHtml(short)}</strong>
-            <span class="address-small">${escapeHtml(hasAddress ? address : "Paste a TON wallet address before requesting payout.")}</span>
+            <span class="address-small">${escapeHtml(hasAddress ? address : t("pasteWalletHint"))}</span>
           </div>
 
           <div class="wallet-actions">
-            <button class="secondary-btn" type="button" data-action="copy-wallet" ${hasAddress ? "" : "disabled"}>Copy address</button>
-            <button class="primary-btn" type="button" data-action="open-wallet">Open @wallet</button>
+            <button class="secondary-btn" type="button" data-action="copy-wallet" ${hasAddress ? "" : "disabled"}>${escapeHtml(t("copyAddress"))}</button>
+            <button class="primary-btn" type="button" data-action="open-wallet">${escapeHtml(t("openWallet"))}</button>
           </div>
 
           <button class="wallet-select" type="button" data-action="save-wallet">${escapeHtml(short)}</button>
 
           <div class="balance-row">
             <div class="mini-stat">
-              <span>Withdrawable</span>
+              <span>${escapeHtml(t("withdrawable"))}</span>
               <strong>${formatNumber(state.profile.balance || 0)}</strong>
             </div>
             <div class="mini-stat">
-              <span>Pending</span>
+              <span>${escapeHtml(t("pending"))}</span>
               <strong>${pendingWithdrawals}</strong>
             </div>
           </div>
 
           <div class="form-grid">
             <label class="field">
-              <span>TON wallet</span>
+              <span>${escapeHtml(t("tonWalletField"))}</span>
               <input
                 type="text"
                 autocomplete="off"
@@ -450,18 +807,18 @@
               />
             </label>
             <label class="field">
-              <span>Withdraw Stars</span>
+              <span>${escapeHtml(t("withdrawStars"))}</span>
               <input type="number" min="1" step="1" value="${escapeAttr(String(state.withdrawAmount))}" data-input="withdraw" />
             </label>
             <button class="primary-btn" type="button" data-action="withdraw" ${state.busy === "withdraw" ? "disabled" : ""}>
-              ${state.busy === "withdraw" ? "Creating request" : "Request payout"}
+              ${state.busy === "withdraw" ? t("createRequest") : t("requestPayout")}
             </button>
             <label class="field">
-              <span>Add Stars</span>
+              <span>${escapeHtml(t("addStars"))}</span>
               <input type="number" min="1" step="1" value="${escapeAttr(String(state.depositAmount))}" data-input="deposit" />
             </label>
             <button class="secondary-btn" type="button" data-action="deposit" ${state.busy === "deposit" ? "disabled" : ""}>
-              ${state.busy === "deposit" ? "Sending invoice" : "Send invoice"}
+              ${state.busy === "deposit" ? t("sendingInvoice") : t("sendInvoice")}
             </button>
           </div>
         </section>
@@ -479,25 +836,25 @@
       <main class="view">
         <div class="view-title-row">
           <div class="title-block">
-            <h1>Activity</h1>
-            <p>Your stakes, wins, and payout requests.</p>
+            <h1>${escapeHtml(t("activity"))}</h1>
+            <p>${escapeHtml(t("yourStakes"))}</p>
           </div>
-          <button class="ghost-btn" type="button" data-action="refresh">Refresh</button>
+          <button class="ghost-btn" type="button" data-action="refresh">${escapeHtml(t("refresh"))}</button>
         </div>
 
         <div class="balance-row">
           <div class="mini-stat">
-            <span>Total staked</span>
+            <span>${escapeHtml(t("totalStaked"))}</span>
             <strong>${formatNumber(state.profile.stats ? state.profile.stats.total_staked : 0)}</strong>
           </div>
           <div class="mini-stat">
-            <span>Total won</span>
+            <span>${escapeHtml(t("totalWon"))}</span>
             <strong>${formatNumber(state.profile.stats ? state.profile.stats.total_won : 0)}</strong>
           </div>
         </div>
 
         <section class="activity-list">
-          ${items.length ? items.map(activityCard).join("") : emptyCard("No activity yet", "Your market stakes and payout requests will land here.")}
+          ${items.length ? items.map(activityCard).join("") : emptyCard(t("emptyActivity"), t("emptyActivityBody"))}
         </section>
       </main>
     `;
@@ -505,9 +862,9 @@
 
   function bottomNav() {
     const items = [
-      { view: "markets", icon: coinStackIcon(), label: "Markets" },
-      { view: "activity", icon: tonIcon(), label: "Activity" },
-      { view: "wallet", icon: walletIcon(), label: "Wallet" },
+      { view: "markets", icon: coinStackIcon(), label: t("markets") },
+      { view: "activity", icon: tonIcon(), label: t("activity") },
+      { view: "wallet", icon: walletIcon(), label: t("wallet") },
     ];
 
     return `
@@ -546,10 +903,10 @@
       <button class="market-card" type="button" data-market-id="${escapeAttr(String(market.id))}">
         <span class="market-logo ${logoClass}">${escapeHtml(logo)}</span>
         <span class="market-main">
-          <span class="market-topline">
-            <span class="market-question">${escapeHtml(market.question || "Untitled market")}</span>
+            <span class="market-topline">
+              <span class="market-question">${escapeHtml(market.question || "Untitled market")}</span>
             <span class="status-pill ${statusClass}">${statusLabel(status)}</span>
-          </span>
+            </span>
           <span class="market-meta">
             <span>${market.bets_count || 0} bets</span>
             <span class="market-pool">${formatNumber(total)} / ${formatNumber(goal)} Stars</span>
@@ -586,7 +943,7 @@
         <section class="bet-sheet" role="dialog" aria-modal="true" aria-label="Place bet" data-sheet>
           <div class="sheet-top">
             <h2>${escapeHtml(market.question || "Untitled market")}</h2>
-            <button class="sheet-close" type="button" data-close-sheet aria-label="Close">x</button>
+            <button class="sheet-close" type="button" data-close-sheet aria-label="${escapeAttr(t("cancel"))}">x</button>
           </div>
 
           <div class="odds-grid">
@@ -603,7 +960,7 @@
           </div>
 
           <label class="field">
-            <span>Stake amount</span>
+            <span>${escapeHtml(t("stakeAmount"))}</span>
             <input type="number" min="${Number(market.min_bet || 1)}" step="1" value="${escapeAttr(
               String(state.stakeAmount),
             )}" data-input="stake" />
@@ -620,28 +977,28 @@
 
           <div class="sheet-summary">
             <div class="summary-line">
-              <span>Selected</span>
+              <span>${escapeHtml(t("selected"))}</span>
               <strong>${escapeHtml(selectedOption)}</strong>
             </div>
             <div class="summary-line">
-              <span>Current pool</span>
+              <span>${escapeHtml(t("currentPool"))}</span>
               <strong>${formatNumber(total)} Stars</strong>
             </div>
             <div class="summary-line">
-              <span>Estimated return</span>
+              <span>${escapeHtml(t("estimatedReturn"))}</span>
               <strong>${formatNumber(estimated)} Stars</strong>
             </div>
             <div class="summary-line">
-              <span>Minimum</span>
+              <span>${escapeHtml(t("minimum"))}</span>
               <strong>${formatNumber(market.min_bet || 1)} Stars</strong>
             </div>
           </div>
 
           <div class="sheet-actions">
             <button class="primary-btn" type="button" data-action="place-bet" ${state.busy === "bet" ? "disabled" : ""}>
-              ${state.busy === "bet" ? "Sending invoice" : "Pay with Stars"}
+              ${state.busy === "bet" ? t("sendingInvoice") : t("payWithStars")}
             </button>
-            <button class="secondary-btn" type="button" data-close-sheet>Cancel</button>
+            <button class="secondary-btn" type="button" data-close-sheet>${escapeHtml(t("cancel"))}</button>
           </div>
         </section>
       </div>
@@ -653,8 +1010,8 @@
       const withdrawal = entry.item;
       return `
         <article class="activity-card">
-          <h3>Payout request</h3>
-          <p>${formatNumber(withdrawal.stars_amount || 0)} Stars to ${escapeHtml(shortenAddress(withdrawal.ton_wallet_address || ""))}</p>
+          <h3>${escapeHtml(t("payoutRequest"))}</h3>
+          <p>${formatNumber(withdrawal.stars_amount || 0)} ${escapeHtml(t("stars"))} ${escapeHtml(t("to"))} ${escapeHtml(shortenAddress(withdrawal.ton_wallet_address || ""))}</p>
           <div class="activity-meta">
             <span class="meta-pill">${escapeHtml(statusLabel(withdrawal.status || "pending"))}</span>
             <span class="meta-pill">${escapeHtml(formatDate(withdrawal.created_at))}</span>
@@ -668,7 +1025,7 @@
     const options = normalizeOptions(market);
     return `
       <article class="activity-card">
-        <h3>${escapeHtml(market.question || "Market stake")}</h3>
+        <h3>${escapeHtml(market.question || t("marketStake"))}</h3>
         <p>${formatNumber(bet.stars_amount || 0)} Stars on ${escapeHtml(options[bet.option_index] || `Option ${bet.option_index + 1}`)}</p>
         <div class="activity-meta">
           <span class="meta-pill">${escapeHtml(statusLabel(market.status || "active"))}</span>
@@ -691,30 +1048,23 @@
 
   function onboardingSlides() {
     return [
+      { title: t("createFromChat"), art: "/app/static/assets/onboarding-chat.png", disclaimers: [] },
+      { title: t("stakeStars"), art: "/app/static/assets/onboarding-stake.png", disclaimers: [] },
       {
-        title: "Create a market from any chat for free",
-        art: "/app/static/assets/onboarding-chat.png",
-        disclaimers: [],
-      },
-      {
-        title: "Stake Stars before anyone else",
-        art: "/app/static/assets/onboarding-stake.png",
-        disclaimers: [],
-      },
-      {
-        title: "Beta payouts are reviewed",
+        title: t("betaPayouts"),
         art: "/app/static/assets/onboarding-payout.png",
-        disclaimers: [
-          "Prediction markets can be risky. Stake only what you can afford.",
-          "Winnings accrue in Stars units before TON-equivalent payout review.",
-          "Use Poolr only where local rules allow this kind of market.",
-        ],
+        disclaimers: [t("disclaimer1"), t("disclaimer2"), t("disclaimer3")],
       },
     ];
   }
 
   function handleClick(event) {
     const target = event.target;
+    const languageButton = target.closest("[data-language]");
+    if (languageButton) {
+      setLanguage(languageButton.dataset.language);
+      return;
+    }
     const nextButton = target.closest("[data-next-onboarding]");
     if (nextButton) {
       nextOnboarding();
@@ -834,7 +1184,7 @@
       state.loading = true;
       render();
       await loadData();
-      showNotice("Poolr is up to date.");
+      showNotice(t("poolrUpToDate"));
       return;
     }
     if (action === "copy-wallet") {
@@ -847,7 +1197,7 @@
     }
     if (action === "save-wallet") {
       safeStorageSet(walletKey, state.walletAddress.trim());
-      showNotice(state.walletAddress.trim() ? "Wallet saved." : "Paste a TON wallet address first.");
+      showNotice(state.walletAddress.trim() ? t("walletSaved") : t("pasteWalletFirst"));
       return;
     }
     if (action === "place-bet") {
@@ -869,12 +1219,12 @@
       return;
     }
     if (market.status && market.status !== "active") {
-      showNotice("This market is not accepting stakes.");
+      showNotice(t("marketClosed"));
       return;
     }
     if (!hasTelegramAuth) {
       state.selectedMarket = null;
-      showNotice("Preview mode: Telegram will send a Stars invoice here.");
+      showNotice(t("previewInvoice"));
       return;
     }
 
@@ -889,10 +1239,10 @@
       });
       state.selectedMarket = null;
       state.busy = "";
-      showNotice("Stars invoice sent. Updating after payment.");
+      showNotice(t("betSent"));
       void refreshAfterInvoice(marketId);
     } catch (error) {
-      showNotice(error.message || "Could not send Stars invoice.");
+      showNotice(error.message || t("couldNotSendInvoice"));
     } finally {
       state.busy = "";
       render();
@@ -905,16 +1255,16 @@
       await loadData();
       const hasRecordedBet = state.bets.some((bet) => String(bet.market_id) === String(marketId));
       if (hasRecordedBet) {
-        showNotice("Bet recorded.");
+        showNotice(t("betRecorded"));
         return;
       }
     }
-    showNotice("Invoice sent. Tap refresh if the pool still looks old.");
+    showNotice(t("invoiceWait"));
   }
 
   async function requestDeposit() {
     if (!hasTelegramAuth) {
-      showNotice("Preview mode: a Stars top-up invoice appears in Telegram.");
+      showNotice(t("previewTopup"));
       return;
     }
     state.busy = "deposit";
@@ -923,9 +1273,9 @@
       await apiPost("/api/deposit", {
         stars_amount: state.depositAmount,
       });
-      showNotice("Stars invoice sent.");
+      showNotice(t("depositSent"));
     } catch (error) {
-      showNotice(error.message || "Could not send deposit invoice.");
+      showNotice(error.message || t("couldNotSendDeposit"));
     } finally {
       state.busy = "";
       render();
@@ -935,12 +1285,12 @@
   async function requestWithdrawal() {
     const wallet = state.walletAddress.trim();
     if (!wallet) {
-      showNotice("Paste a TON wallet address first.");
+      showNotice(t("pasteWalletFirst"));
       return;
     }
     safeStorageSet(walletKey, wallet);
     if (!hasTelegramAuth) {
-      showNotice("Preview mode: payout request would be sent for review.");
+      showNotice(t("previewPayout"));
       return;
     }
 
@@ -951,10 +1301,10 @@
         stars_amount: state.withdrawAmount,
         ton_wallet_address: wallet,
       });
-      showNotice("Payout request created.");
+      showNotice(t("requestCreated"));
       await loadData();
     } catch (error) {
-      showNotice(error.message || "Could not create payout request.");
+      showNotice(error.message || t("couldNotCreateRequest"));
     } finally {
       state.busy = "";
       render();
@@ -964,12 +1314,12 @@
   async function copyWallet() {
     const wallet = state.walletAddress.trim();
     if (!wallet) {
-      showNotice("Paste a TON wallet address first.");
+      showNotice(t("copyFirst"));
       return;
     }
     try {
       await navigator.clipboard.writeText(wallet);
-      showNotice("Wallet address copied.");
+      showNotice(t("copied"));
       haptic("light");
     } catch (error) {
       showNotice(wallet);
@@ -1034,27 +1384,18 @@
 
   function marketLogoText(market) {
     const text = String(market.question || "PO");
-    const words = text.match(/[A-Za-z0-9]+/g) || ["PO"];
+    const words = text.match(/[\p{L}\p{N}]+/gu) || ["PO"];
     const first = words[0] || "PO";
     return first.length <= 3 ? first.toUpperCase() : first.slice(0, 3).toUpperCase();
   }
 
   function statusLabel(status) {
-    const labels = {
-      active: "Open",
-      closed: "Closed",
-      resolved: "Resolved",
-      cancelled: "Refunded",
-      disputed: "Disputed",
-      pending: "Pending",
-      completed: "Paid",
-      failed: "Rejected",
-    };
-    return labels[status] || capitalize(status || "Open");
+    const labels = t("statusLabels");
+    return labels[status] || capitalize(status || t("open"));
   }
 
   function formatNumber(value) {
-    return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Number(value || 0));
+    return new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 0 }).format(Number(value || 0));
   }
 
   function formatPercent(value) {
@@ -1063,13 +1404,13 @@
 
   function formatDate(value) {
     if (!value) {
-      return "Now";
+      return t("now");
     }
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
-      return "Now";
+      return t("now");
     }
-    return new Intl.DateTimeFormat("en", {
+    return new Intl.DateTimeFormat(currentLocale(), {
       month: "short",
       day: "numeric",
       hour: "2-digit",
@@ -1079,7 +1420,7 @@
 
   function shortenAddress(value) {
     if (!value) {
-      return "Connect wallet";
+      return t("openWallet");
     }
     if (value.length <= 14) {
       return value;

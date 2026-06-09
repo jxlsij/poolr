@@ -119,6 +119,9 @@ after every meaningful architecture, deployment, environment, or module change.
     markets stored with `markets.chat_id = 0`; group and private-chat markets
     remain reachable through their message button/direct `market_id` link but
     do not appear in the global feed.
+  - Mini App localization now auto-detects Russian from Telegram
+    `initDataUnsafe.user.language_code` or the browser language, defaults to
+    Russian when appropriate, and provides a RU/EN switch inside onboarding.
 
 ## Product Direction
 
@@ -466,6 +469,10 @@ notification and expiry-worker foundation.
     adding inline market answer-count/deadline choices and custom
     `question | options | deadline` parsing while keeping creation lazy on
     `chosen_inline_result` (same pytest-asyncio warnings).
+  - `.venv/bin/python -m pytest tests/test_main_frontend.py -q` and
+    `.venv/bin/python -m pytest -q` passed with 139 tests on 2026-06-09 after
+    adding RU/EN Mini App localization with Telegram/browser auto-detection
+    and a user-facing language switcher (same pytest-asyncio warnings).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:
