@@ -146,7 +146,7 @@ async def test_markets_endpoint_lists_active_markets(api_client, session_factory
         active_market = await create_market(
             session,
             creator_id=42,
-            chat_id=-100,
+            chat_id=0,
             question="Will Poolr launch today?",
             options=["Yes", "No"],
             deadline=datetime.now(timezone.utc) + timedelta(hours=2),
@@ -155,7 +155,7 @@ async def test_markets_endpoint_lists_active_markets(api_client, session_factory
         resolved_market = await create_market(
             session,
             creator_id=42,
-            chat_id=-100,
+            chat_id=0,
             question="Did the demo pass?",
             options=["Yes", "No"],
             deadline=datetime.now(timezone.utc) + timedelta(hours=2),
@@ -169,6 +169,50 @@ async def test_markets_endpoint_lists_active_markets(api_client, session_factory
     body = await response.json()
     assert body["status"] == "active"
     assert [market["id"] for market in body["markets"]] == [active_market.id]
+
+
+@pytest.mark.asyncio
+async def test_markets_endpoint_only_lists_public_feed_markets(api_client, session_factory) -> None:
+    client, _fake_bot = api_client
+    async with session_scope(session_factory) as session:
+        await create_or_get_user(session, 42, "ada", "Ada")
+        public_market = await create_market(
+            session,
+            creator_id=42,
+            chat_id=0,
+            question="Will public markets work?",
+            options=["Yes", "No"],
+            deadline=datetime.now(timezone.utc) + timedelta(hours=2),
+            min_bet=5,
+        )
+        group_market = await create_market(
+            session,
+            creator_id=42,
+            chat_id=-100,
+            question="Will the group see this locally?",
+            options=["Yes", "No"],
+            deadline=datetime.now(timezone.utc) + timedelta(hours=2),
+            min_bet=5,
+        )
+        private_chat_market = await create_market(
+            session,
+            creator_id=42,
+            chat_id=42,
+            question="Will this stay behind the message button?",
+            options=["Yes", "No"],
+            deadline=datetime.now(timezone.utc) + timedelta(hours=2),
+            min_bet=5,
+        )
+
+    response = await client.get("/api/markets?status=all", headers=auth_headers(42))
+
+    assert response.status == 200
+    body = await response.json()
+    assert [market["id"] for market in body["markets"]] == [public_market.id]
+
+    for market in (group_market, private_chat_market):
+        detail_response = await client.get(f"/api/market/{market.id}", headers=auth_headers(42))
+        assert detail_response.status == 200
 
 
 @pytest.mark.asyncio

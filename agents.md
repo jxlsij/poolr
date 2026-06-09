@@ -113,7 +113,10 @@ after every meaningful architecture, deployment, environment, or module change.
     disclaimers, live markets/activity/wallet views, Stars bet and deposit
     actions, manual payout request UI, generated Telegram-style PNG sticker
     assets, iPhone-mini-safe onboarding layout, and a `/api/markets` feed for
-    the main screen.
+    the main screen. The public Mini App feed only lists public/app-origin
+    markets stored with `markets.chat_id = 0`; group and private-chat markets
+    remain reachable through their message button/direct `market_id` link but
+    do not appear in the global feed.
 
 ## Product Direction
 
@@ -438,6 +441,11 @@ notification and expiry-worker foundation.
     restoring robust Mini App entry buttons and tightening iPhone mini
     onboarding layout (same pytest-asyncio warnings). Browser checks passed for
     onboarding at 375x812, 375x680, and 375x620.
+  - `.venv/bin/python -m compileall api bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 134 tests on 2026-06-09 after
+    limiting the Mini App market feed to public `chat_id = 0` markets while
+    preserving direct message-button access to group/private markets (same
+    pytest-asyncio warnings).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:

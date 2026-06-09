@@ -49,6 +49,7 @@ INIT_DATA_HEADER = "X-Telegram-Init-Data"
 AUTH_SCHEME = "tma"
 DEFAULT_PAGE_LIMIT = 25
 MAX_PAGE_LIMIT = 100
+PUBLIC_MARKET_CHAT_ID = 0
 API_BOT_KEY = web.AppKey("api_bot", Bot)
 API_BOT_TOKEN_KEY = web.AppKey("api_bot_token", str)
 API_SESSION_FACTORY_KEY = web.AppKey("api_session_factory", async_sessionmaker[AsyncSession])
@@ -188,7 +189,7 @@ async def api_get_markets(request: web.Request) -> web.Response:
     offset = parse_offset(request.query.get("offset"))
     status_filter = parse_market_status_filter(request.query.get("status"))
     async with api_context(request) as ctx:
-        stmt = select(Market)
+        stmt = select(Market).where(Market.chat_id == PUBLIC_MARKET_CHAT_ID)
         if status_filter is not None:
             stmt = stmt.where(Market.status == status_filter)
         stmt = stmt.order_by(Market.created_at.desc(), Market.id.desc()).limit(limit).offset(offset)

@@ -204,7 +204,9 @@
     if (!market && hasTelegramAuth) {
       try {
         market = await apiGet(`/api/market/${encodeURIComponent(targetMarketId)}`);
-        state.markets = [market, ...state.markets.filter((candidate) => String(candidate.id) !== String(market.id))];
+        if (isPublicMarket(market)) {
+          state.markets = [market, ...state.markets.filter((candidate) => String(candidate.id) !== String(market.id))];
+        }
       } catch (error) {
         console.warn("Could not open linked market", error);
         showNotice("Could not open this market.");
@@ -220,6 +222,10 @@
     state.selectedMarket = market;
     state.selectedOption = 0;
     state.stakeAmount = Math.max(Number(market.min_bet || 1), state.stakeAmount || 1);
+  }
+
+  function isPublicMarket(market) {
+    return Number(market && market.chat_id) === 0;
   }
 
   async function apiGet(path) {
