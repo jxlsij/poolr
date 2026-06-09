@@ -23,6 +23,7 @@ from bot.crud import (
     RecordNotFoundError,
     create_bet,
     get_pool_by_option,
+    get_user_bet_on_market,
     update_user_balance,
 )
 from bot.handlers.markets import update_market_card, update_inline_market_card
@@ -33,6 +34,7 @@ from bot.payments import (
     PaymentProviderError,
     PaymentValidationError,
 )
+from bot.product_limits import MAX_STAKE_STARS, ProductLimitError, require_stars_limit
 from bot.users import UserModuleError, ensure_user
 
 
@@ -56,9 +58,11 @@ class BettingProviderError(BettingModuleError):
 
 class BetValidationError(StrEnum):
     MARKET_CLOSED = "market_closed"
+    USER_BANNED = "user_banned"
     CREATOR_CANNOT_BET = "creator_cannot_bet"
     INSUFFICIENT_BALANCE = "insufficient_balance"
     BELOW_MIN_BET = "below_min_bet"
+    ABOVE_MAX_STAKE = "above_max_stake"
     INVALID_OPTION = "invalid_option"
     ALREADY_BET = "already_bet"
 
@@ -163,7 +167,13 @@ async def handle_bet_amount_message(
     try:
         user, _is_new = await ensure_user(session, message.from_user)
         market = await _get_market_for_read(session, market_id)
-        validation_error = validate_stake_invoice_request(user, market, option_index, amount)
+        validation_error = await validate_stake_invoice_request_for_user(
+            session,
+            user,
+            market,
+            option_index,
+            amount,
+        )
         if validation_error is not None:
             await message.answer(_validation_message(validation_error, market))
             await state.clear()
@@ -254,7 +264,8 @@ async def validate_stake_pre_checkout(
 
     user = await _get_user_for_read(session, payload["user_id"])
     market = await _get_market_for_read(session, payload["market_id"])
-    return validate_stake_invoice_request(
+    return await validate_stake_invoice_request_for_user(
+        session=session,
         user=user,
         market=market,
         option_index=payload["option_index"],
@@ -298,13 +309,37 @@ async def handle_successful_stake_payment(
             )
             return None
 
-        result = await place_bet(
-            session=session,
-            user_id=user_id,
-            market_id=market_id,
-            option_index=option_index,
-            credits_amount=stars_amount,
-        )
+        try:
+            result = await place_bet(
+                session=session,
+                user_id=user_id,
+                market_id=market_id,
+                option_index=option_index,
+                credits_amount=stars_amount,
+            )
+        except ValueError as exc:
+            validation_value = str(exc)
+            if validation_value in {error.value for error in BetValidationError}:
+                logger.warning(
+                    "Stake payment credited but bet was rejected after payment: user_id=%d market_id=%d reason=%s charge_id=%s",
+                    user_id,
+                    market_id,
+                    validation_value,
+                    _redact_charge_id(charge_id),
+                )
+                try:
+                    await message.answer(
+                        "Payment received, but this stake could not be placed. "
+                        f"{stars_amount} Stars were added to your withdrawable balance."
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to notify user about credited rejected stake payment: user_id=%d market_id=%d",
+                        user_id,
+                        market_id,
+                    )
+                return None
+            raise
         market = await _get_market_for_read(session, market_id)
         try:
             await update_market_card_for_bet(
@@ -388,6 +423,9 @@ async def place_bet(
         validation_error = validate_bet_request(user, market, option_index, credits_amount)
         if validation_error is not None:
             raise ValueError(validation_error.value)
+        existing_bet = await get_user_bet_on_market(session, user_id, market_id)
+        if existing_bet is not None:
+            raise ValueError(BetValidationError.ALREADY_BET.value)
 
         await update_user_balance(
             session=session,
@@ -447,12 +485,35 @@ def validate_stake_invoice_request(
 ) -> BetValidationError | None:
     if market.status != MarketStatus.ACTIVE or _is_past_deadline(market.deadline):
         return BetValidationError.MARKET_CLOSED
+    if user.is_banned:
+        return BetValidationError.USER_BANNED
     if market.creator_id == user.telegram_id:
         return BetValidationError.CREATOR_CANNOT_BET
     if option_index < 0 or option_index >= len(market.options):
         return BetValidationError.INVALID_OPTION
     if stars_amount < market.min_bet:
         return BetValidationError.BELOW_MIN_BET
+    try:
+        require_stars_limit(stars_amount, MAX_STAKE_STARS, "stake amount")
+    except ProductLimitError:
+        return BetValidationError.ABOVE_MAX_STAKE
+    return None
+
+
+async def validate_stake_invoice_request_for_user(
+    session: AsyncSession,
+    user: User,
+    market: Market,
+    option_index: int,
+    stars_amount: int,
+) -> BetValidationError | None:
+    validation_error = validate_stake_invoice_request(user, market, option_index, stars_amount)
+    if validation_error is not None:
+        return validation_error
+
+    existing_bet = await get_user_bet_on_market(session, user.telegram_id, market.id)
+    if existing_bet is not None:
+        return BetValidationError.ALREADY_BET
     return None
 
 
@@ -583,6 +644,10 @@ def parse_stake_amount(value: str | None) -> int:
         raise ValueError("Stake amount must be a whole number of Stars.") from exc
     if amount < 1:
         raise ValueError("Stake amount must be at least 1 Star.")
+    try:
+        require_stars_limit(amount, MAX_STAKE_STARS, "Stake amount")
+    except ProductLimitError as exc:
+        raise ValueError(str(exc)) from exc
     return amount
 
 
@@ -661,11 +726,15 @@ async def _answer_callback(
 def _validation_message(error: BetValidationError, market: Market | None = None) -> str:
     if error == BetValidationError.MARKET_CLOSED:
         return "This market is closed."
+    if error == BetValidationError.USER_BANNED:
+        return "This account cannot place bets."
     if error == BetValidationError.CREATOR_CANNOT_BET:
         return "Market creators cannot bet on their own markets."
     if error == BetValidationError.BELOW_MIN_BET:
         minimum = f" Minimum is {market.min_bet} Stars." if market is not None else ""
         return f"Stake is below the market minimum.{minimum}"
+    if error == BetValidationError.ABOVE_MAX_STAKE:
+        return f"Stake is above the {MAX_STAKE_STARS} Stars limit."
     if error == BetValidationError.INVALID_OPTION:
         return "This market option is invalid."
     if error == BetValidationError.ALREADY_BET:

@@ -25,6 +25,8 @@ from bot.withdrawals import (
     validate_ton_wallet,
 )
 
+VALID_TON_WALLET = "0:" + "a" * 64
+
 
 @pytest_asyncio.fixture
 async def session_factory():
@@ -86,7 +88,7 @@ class FakeBot:
 
 def test_withdrawal_validation_helpers() -> None:
     assert parse_withdrawal_amount("25") == 25
-    assert validate_ton_wallet("EQD1234567890abcdefghi") == "EQD1234567890abcdefghi"
+    assert validate_ton_wallet(VALID_TON_WALLET) == VALID_TON_WALLET
     assert validate_ton_tx_hash("tx_1234567890abcdef") == "tx_1234567890abcdef"
     assert parse_withdrawal_callback_data("withdraw_paid:123", "withdraw_paid") == 123
 
@@ -112,7 +114,7 @@ async def test_request_withdrawal_reserves_stars_and_creates_pending_request(
             session=session,
             user_id=101,
             stars_amount=40,
-            ton_wallet_address="EQD1234567890abcdefghi",
+            ton_wallet_address=VALID_TON_WALLET,
         )
 
         user = await get_user_by_id(session, 101)
@@ -120,7 +122,7 @@ async def test_request_withdrawal_reserves_stars_and_creates_pending_request(
 
     assert result.withdrawal.status == WithdrawalStatus.PENDING
     assert result.withdrawal.credits_amount == 40
-    assert result.withdrawal.ton_wallet_address == "EQD1234567890abcdefghi"
+    assert result.withdrawal.ton_wallet_address == VALID_TON_WALLET
     assert result.remaining_balance == 60
     assert user is not None
     assert user.balance_credits == 60
@@ -137,7 +139,7 @@ async def test_request_withdrawal_rejects_insufficient_balance(session_factory) 
                 session=session,
                 user_id=101,
                 stars_amount=1,
-                ton_wallet_address="EQD1234567890abcdefghi",
+                ton_wallet_address=VALID_TON_WALLET,
             )
 
 
@@ -150,7 +152,7 @@ async def test_mark_manual_payout_paid_records_ton_tx_without_refund(
         user = await get_user_by_id(session, 101)
         user.balance_credits = 100
         await session.flush()
-        request = await request_withdrawal(session, 101, 40, "EQD1234567890abcdefghi")
+        request = await request_withdrawal(session, 101, 40, VALID_TON_WALLET)
 
         result = await mark_manual_payout_paid(
             session=session,
@@ -175,7 +177,7 @@ async def test_reject_withdrawal_returns_reserved_stars(session_factory) -> None
         user = await get_user_by_id(session, 101)
         user.balance_credits = 100
         await session.flush()
-        request = await request_withdrawal(session, 101, 40, "EQD1234567890abcdefghi")
+        request = await request_withdrawal(session, 101, 40, VALID_TON_WALLET)
 
         result = await reject_withdrawal(
             session=session,
@@ -254,7 +256,7 @@ def test_admin_withdrawal_text_uses_stars_and_ton_language() -> None:
         id=123,
         user_id=101,
         credits_amount=40,
-        ton_wallet_address="EQD1234567890abcdefghi",
+        ton_wallet_address=VALID_TON_WALLET,
     )
 
     text = build_admin_withdrawal_text(withdrawal)
@@ -285,7 +287,7 @@ async def test_request_withdrawal_wraps_unexpected_errors(
                 session=session,
                 user_id=101,
                 stars_amount=1,
-                ton_wallet_address="EQD1234567890abcdefghi",
+                    ton_wallet_address=VALID_TON_WALLET,
             )
 
     assert "Withdrawal operation failed unexpectedly: request_withdrawal" in caplog.text

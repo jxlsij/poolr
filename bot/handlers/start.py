@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from aiogram import Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
@@ -31,6 +31,12 @@ START_MESSAGE_TEXT = """*Привет! Я Poolr.* Создавай prediction ma
 — Проверяй, кто был прав"""
 
 START_IMAGE_PATH = Path(__file__).resolve().parents[1] / "assets" / "start_message.png"
+PAY_SUPPORT_TEXT = (
+    "Poolr payment support\n\n"
+    "If a Stars payment, stake, refund, dispute, or manual TON-equivalent payout looks wrong, "
+    "message support with your Telegram user id, market id, payout request id, and any Telegram charge id you have.\n\n"
+    "Beta payouts are manual and reviewed by admins. Do not send private keys or seed phrases."
+)
 
 
 def build_start_keyboard(open_url: str | None) -> InlineKeyboardMarkup | None:
@@ -107,5 +113,10 @@ def create_start_router(open_url: str | None = None) -> Router:
             parse_mode="Markdown",
             reply_markup=reply_markup,
         )
+
+    @router.message(Command("paysupport", ignore_mention=True))
+    async def handle_pay_support(message: Message) -> None:
+        logger.info("Handling /paysupport: user_id=%s", message.from_user.id if message.from_user else None)
+        await message.answer(PAY_SUPPORT_TEXT)
 
     return router

@@ -17,6 +17,7 @@ from bot.models import Base, MarketStatus
 
 
 BOT_TOKEN = "123456:test-token"
+VALID_TON_WALLET = "0:" + "a" * 64
 
 
 class FakeBot:
@@ -250,6 +251,39 @@ async def test_place_bet_sends_stars_invoice_without_recording_bet(
 
 
 @pytest.mark.asyncio
+async def test_place_bet_rejects_existing_bet_before_invoice(
+    api_client,
+    session_factory,
+) -> None:
+    client, fake_bot = api_client
+    async with session_scope(session_factory) as session:
+        await create_or_get_user(session, 42, "ada", "Ada")
+        await create_or_get_user(session, 77, "linus", "Linus")
+        market = await create_market(
+            session,
+            creator_id=77,
+            chat_id=-100,
+            question="Will Max be late?",
+            options=["Yes", "No"],
+            deadline=datetime.now(timezone.utc) + timedelta(hours=2),
+            min_bet=5,
+        )
+        await create_bet(session, 42, market.id, 0, 10)
+
+    response = await client.post(
+        "/api/bet",
+        headers=auth_headers(42),
+        json={"market_id": market.id, "option_index": 1, "stars_amount": 10},
+    )
+
+    assert response.status == 400
+    body = await response.json()
+    assert body["error"]["code"] == "already_bet"
+    assert body["error"]["message"] == "You already have a bet on this market."
+    assert fake_bot.invoices == []
+
+
+@pytest.mark.asyncio
 async def test_place_bet_provider_failure_returns_502(api_client, session_factory) -> None:
     client, fake_bot = api_client
     fake_bot.fail_invoices = True
@@ -290,7 +324,7 @@ async def test_withdrawal_request_reserves_balance(api_client, session_factory) 
         headers=auth_headers(42),
         json={
             "stars_amount": 20,
-            "ton_wallet_address": "EQCabcdefghijklmnopqrstuvwxyz1234567890",
+            "ton_wallet_address": VALID_TON_WALLET,
         },
     )
 
@@ -314,7 +348,7 @@ async def test_withdrawal_validation_error_returns_400(api_client, session_facto
         headers=auth_headers(42),
         json={
             "stars_amount": 20,
-            "ton_wallet_address": "EQCabcdefghijklmnopqrstuvwxyz1234567890",
+            "ton_wallet_address": VALID_TON_WALLET,
         },
     )
 

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from bot.betting import place_bet
@@ -29,7 +30,7 @@ from bot.fraud import (
     parse_arbitrate_callback_data,
     parse_dispute_callback_data,
 )
-from bot.models import Base, Bet, Deposit, DepositStatus, Market, MarketStatus
+from bot.models import Base, Bet, Deposit, DepositStatus, LedgerEntry, LedgerEntryType, Market, MarketStatus
 from bot.resolution import resolve_market
 
 
@@ -135,7 +136,7 @@ async def test_freeze_market_for_dispute_marks_market_disputed_and_notifies_admi
 async def test_freeze_market_for_dispute_rejects_closed_window(session_factory) -> None:
     async with session_factory() as session:
         market = await _create_resolved_market(session)
-        market.resolved_at = datetime.now(timezone.utc) - timedelta(hours=3)
+        market.resolved_at = datetime.now(timezone.utc) - timedelta(hours=25)
         await session.flush()
 
         with pytest.raises(FraudValidationError):
@@ -228,13 +229,56 @@ async def test_admin_arbitrate_reopens_resolved_status_without_double_payout(
         dispute = await get_open_dispute_for_market(session, market.id)
 
     assert result.market.status == MarketStatus.RESOLVED
-    assert result.payouts_created == 0
+    assert result.payouts_created == 1
     assert result.dispute is not None
     assert result.dispute.status.value == "resolved"
     assert dispute is None
     assert winner_before is not None
     assert winner_after is not None
     assert winner_after.balance_credits == winner_before.balance_credits
+
+
+@pytest.mark.asyncio
+async def test_admin_arbitrate_records_ledger_reversals_for_old_holds(session_factory) -> None:
+    bot = FakeBot()
+
+    async with session_factory() as session:
+        market = await _create_resolved_market(session)
+        await freeze_market_for_dispute(
+            session=session,
+            bot=bot,
+            market_id=market.id,
+            raised_by=303,
+            reason="Review requested",
+            admin_ids=[],
+        )
+
+        await admin_arbitrate(
+            session=session,
+            bot=bot,
+            market_id=market.id,
+            winning_option_index=1,
+            admin_id=9001,
+            platform_fee_pct=0.08,
+        )
+        reversal_entries = list(
+            (
+                await session.scalars(
+                    select(LedgerEntry).where(
+                        LedgerEntry.entry_type.in_(
+                            [
+                                LedgerEntryType.PAYOUT_HOLD_REVERSAL,
+                                LedgerEntryType.PLATFORM_FEE_REVERSAL,
+                            ]
+                        )
+                    )
+                )
+            ).all()
+        )
+
+    assert any(entry.entry_type == LedgerEntryType.PAYOUT_HOLD_REVERSAL for entry in reversal_entries)
+    assert any(entry.entry_type == LedgerEntryType.PLATFORM_FEE_REVERSAL for entry in reversal_entries)
+    assert all(entry.amount < 0 for entry in reversal_entries)
 
 
 async def _create_resolved_market(session) -> Market:

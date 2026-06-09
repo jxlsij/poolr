@@ -57,7 +57,7 @@ async def test_monitor_payment_anomalies_flags_high_withdrawal_pressure(session_
             session,
             user_id=42,
             credits_amount=150,
-            ton_wallet_address="EQCabcdefghijklmnopqrstuvwxyz1234567890",
+            ton_wallet_address="0:" + "a" * 64,
         )
         withdrawal.status = WithdrawalStatus.PENDING
 

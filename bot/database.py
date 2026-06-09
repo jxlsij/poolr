@@ -90,14 +90,38 @@ async def run_sql_migrations(
     logger.info("Running SQL migrations: count=%d", len(migration_files))
     try:
         async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS schema_migrations ("
+                    "version TEXT PRIMARY KEY, "
+                    "applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                    ")"
+                )
+            )
             for migration_file in migration_files:
+                version = migration_file.name
+                already_applied = await conn.scalar(
+                    text("SELECT 1 FROM schema_migrations WHERE version = :version"),
+                    {"version": version},
+                )
+                if already_applied:
+                    logger.debug("Skipping already applied SQL migration: %s", version)
+                    continue
                 sql = migration_file.read_text().strip()
                 if not sql:
                     logger.debug("Skipping empty SQL migration: %s", migration_file.name)
+                    await conn.execute(
+                        text("INSERT INTO schema_migrations (version) VALUES (:version)"),
+                        {"version": version},
+                    )
                     continue
-                logger.info("Applying SQL migration: %s", migration_file.name)
+                logger.info("Applying SQL migration: %s", version)
                 for statement in _split_sql_statements(sql):
                     await conn.execute(text(statement))
+                await conn.execute(
+                    text("INSERT INTO schema_migrations (version) VALUES (:version)"),
+                    {"version": version},
+                )
     except (OSError, SQLAlchemyError) as exc:
         logger.exception("Failed to run SQL migrations")
         raise DatabaseSessionError("SQL migration failed") from exc

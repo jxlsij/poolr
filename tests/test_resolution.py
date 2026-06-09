@@ -15,7 +15,7 @@ from bot.crud import (
     update_user_balance,
 )
 from bot.database import create_all_tables, create_session_factory
-from bot.models import Base, Market, MarketStatus, Payout
+from bot.models import Base, Market, MarketStatus, Payout, PayoutStatus
 from bot.resolution import (
     ResolutionPersistenceError,
     ResolutionValidationError,
@@ -26,6 +26,7 @@ from bot.resolution import (
     handle_resolve_callback,
     parse_resolve_callback_data,
     publish_resolution_results,
+    release_available_payouts,
     resolve_market,
 )
 
@@ -83,7 +84,7 @@ def test_resolution_callback_and_keyboard() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_market_distributes_withdrawable_stars(session_factory) -> None:
+async def test_resolve_market_holds_winnings_until_dispute_window_closes(session_factory) -> None:
     async with session_factory() as session:
         market = await _create_market_with_bets(session)
         market.deadline = datetime.now(timezone.utc) - timedelta(minutes=1)
@@ -101,6 +102,22 @@ async def test_resolve_market_distributes_withdrawable_stars(session_factory) ->
         winner_two = await get_user_by_id(session, 303)
         loser = await get_user_by_id(session, 404)
         payouts = await get_payouts_for_market(session, market.id)
+        assert winner_one is not None
+        assert winner_one.balance_credits == 0
+        assert winner_two is not None
+        assert winner_two.balance_credits == 0
+        assert loser is not None
+        assert loser.balance_credits == 0
+        assert [payout.credits_won for payout in payouts] == [57, 19]
+        assert [payout.status for payout in payouts] == [PayoutStatus.HELD, PayoutStatus.HELD]
+
+        released = await release_available_payouts(
+            session,
+            now=datetime.now(timezone.utc) + timedelta(hours=25),
+        )
+        winner_one = await get_user_by_id(session, 202)
+        winner_two = await get_user_by_id(session, 303)
+        payouts = await get_payouts_for_market(session, market.id)
 
     assert result.platform_fee_collected == 3
     assert result.total_participants == 3
@@ -110,9 +127,9 @@ async def test_resolve_market_distributes_withdrawable_stars(session_factory) ->
     assert winner_one.balance_credits == 19
     assert winner_two is not None
     assert winner_two.balance_credits == 57
-    assert loser is not None
-    assert loser.balance_credits == 0
     assert [payout.credits_won for payout in payouts] == [57, 19]
+    assert [payout.status for payout in payouts] == [PayoutStatus.RELEASED, PayoutStatus.RELEASED]
+    assert released == 2
 
 
 @pytest.mark.asyncio

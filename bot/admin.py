@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models import Bet, Dispute, DisputeStatus, Market, MarketStatus, Payout, User, Withdrawal, WithdrawalStatus
+from bot.monitoring import AnomalyReport, monitor_payment_anomalies
 from bot.security import is_admin
 
 
@@ -59,6 +60,14 @@ def create_admin_router(admin_ids: list[int] | None = None) -> Router:
     @router.message(Command("admin_disputes", ignore_mention=True))
     async def admin_disputes_handler(message: Message, db_session: AsyncSession) -> None:
         await handle_admin_disputes(message, db_session, resolved_admin_ids)
+
+    @router.message(Command("admin_withdrawals", ignore_mention=True))
+    async def admin_withdrawals_handler(message: Message, db_session: AsyncSession) -> None:
+        await handle_admin_withdrawals(message, db_session, resolved_admin_ids)
+
+    @router.message(Command("admin_anomalies", ignore_mention=True))
+    async def admin_anomalies_handler(message: Message, db_session: AsyncSession) -> None:
+        await handle_admin_anomalies(message, db_session, resolved_admin_ids)
 
     @router.message(Command("broadcast", ignore_mention=True))
     async def broadcast_command_handler(message: Message, state: FSMContext) -> None:
@@ -150,6 +159,47 @@ async def handle_admin_disputes(
     )
     await _answer_message(message, build_admin_disputes_text(disputes))
     logger.info("Admin disputes sent: admin_id=%d count=%d", admin_id, len(disputes))
+
+
+async def handle_admin_withdrawals(
+    message: Message,
+    session: AsyncSession,
+    admin_ids: list[int],
+) -> None:
+    admin_id = _message_user_id(message)
+    if not is_admin(admin_id, admin_ids):
+        await _answer_message(message, "Access denied")
+        logger.warning("Unauthorized /admin_withdrawals attempt: user_id=%s", admin_id)
+        return
+
+    rows = list(
+        (
+            await session.scalars(
+                select(Withdrawal)
+                .where(Withdrawal.status == WithdrawalStatus.PENDING)
+                .order_by(Withdrawal.created_at.asc(), Withdrawal.id.asc())
+                .limit(10)
+            )
+        ).all()
+    )
+    await _answer_message(message, build_admin_withdrawals_text(rows))
+    logger.info("Admin withdrawals sent: admin_id=%d count=%d", admin_id, len(rows))
+
+
+async def handle_admin_anomalies(
+    message: Message,
+    session: AsyncSession,
+    admin_ids: list[int],
+) -> None:
+    admin_id = _message_user_id(message)
+    if not is_admin(admin_id, admin_ids):
+        await _answer_message(message, "Access denied")
+        logger.warning("Unauthorized /admin_anomalies attempt: user_id=%s", admin_id)
+        return
+
+    reports = await monitor_payment_anomalies(session)
+    await _answer_message(message, build_admin_anomalies_text(reports))
+    logger.info("Admin anomalies sent: admin_id=%d count=%d", admin_id, len(reports))
 
 
 async def handle_broadcast_command(
@@ -255,6 +305,35 @@ def build_admin_disputes_text(rows: list[tuple[Dispute, Market]]) -> str:
         lines.append(
             f"#{dispute.id} market #{market.id}: {market.question}\n"
             f"Raised by: {dispute.raised_by}"
+        )
+    return "\n\n".join(lines)
+
+
+def build_admin_withdrawals_text(withdrawals: list[Withdrawal]) -> str:
+    if not withdrawals:
+        return "No pending withdrawals."
+
+    lines = ["Pending withdrawals"]
+    for withdrawal in withdrawals:
+        lines.append(
+            f"#{withdrawal.id} user {withdrawal.user_id}\n"
+            f"Amount: {withdrawal.credits_amount} Stars\n"
+            f"Wallet: {withdrawal.ton_wallet_address}\n"
+            f"Created: {withdrawal.created_at.isoformat()}"
+        )
+    return "\n\n".join(lines)
+
+
+def build_admin_anomalies_text(reports: list[AnomalyReport]) -> str:
+    if not reports:
+        return "No payment anomalies found."
+
+    lines = ["Payment anomalies"]
+    for report in reports[:10]:
+        lines.append(
+            f"{report.severity.upper()} user {report.user_id}\n"
+            f"Kind: {report.kind}\n"
+            f"Details: {report.details}"
         )
     return "\n\n".join(lines)
 

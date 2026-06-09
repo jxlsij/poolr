@@ -19,6 +19,7 @@ from bot.crud import (
     update_user_balance,
 )
 from bot.models import DepositStatus
+from bot.product_limits import MAX_DEPOSIT_STARS, ProductLimitError, require_stars_limit
 from bot.users import UserModuleError, ensure_user
 
 
@@ -53,6 +54,10 @@ async def send_deposit_invoice(
 ) -> Message:
     _require_positive_int(user_id, "user_id")
     _require_positive_int(stars_amount, "stars_amount")
+    try:
+        require_stars_limit(stars_amount, MAX_DEPOSIT_STARS, "Stars amount")
+    except ProductLimitError as exc:
+        raise PaymentValidationError(str(exc)) from exc
     _require_text(description, "description")
 
     payload = build_deposit_invoice_payload(user_id, stars_amount)
@@ -170,18 +175,14 @@ async def handle_successful_payment(
             from bot.betting import (
                 BettingModuleError,
                 handle_successful_stake_payment,
-                validate_stake_pre_checkout,
             )
 
-            validation_error = await validate_stake_pre_checkout(
-                session=session,
-                payload=payload,
-                payer_id=payer_id,
+            _validate_stars_payment(
                 currency=payment.currency,
                 total_amount=payment.total_amount,
+                payload={"user_id": payload["user_id"], "stars_amount": payload["stars_amount"]},
+                payer_id=payer_id,
             )
-            if validation_error is not None:
-                raise PaymentValidationError(validation_error.value)
             try:
                 await handle_successful_stake_payment(
                     message=message,
@@ -284,6 +285,10 @@ async def credit_credits(
 def build_deposit_invoice_payload(user_id: int, stars_amount: int) -> str:
     _require_positive_int(user_id, "user_id")
     _require_positive_int(stars_amount, "stars_amount")
+    try:
+        require_stars_limit(stars_amount, MAX_DEPOSIT_STARS, "Stars amount")
+    except ProductLimitError as exc:
+        raise PaymentValidationError(str(exc)) from exc
     return json.dumps(
         {
             "t": PAYLOAD_TYPE_DIRECT_STAKE,

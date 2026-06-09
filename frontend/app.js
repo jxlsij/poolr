@@ -1379,7 +1379,8 @@
     if (selectedPool <= 0) {
       return stake;
     }
-    return Math.max(1, Math.floor((stake / selectedPool) * totalPool * 0.92));
+    const platformFeePct = Math.min(Math.max(Number(market.platform_fee_pct ?? 0.08), 0), 0.99);
+    return Math.max(1, Math.floor((stake / selectedPool) * totalPool * (1 - platformFeePct)));
   }
 
   function marketLogoText(market) {

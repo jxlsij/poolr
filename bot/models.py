@@ -47,6 +47,19 @@ class WithdrawalStatus(StrEnum):
     FAILED = "failed"
 
 
+class PayoutStatus(StrEnum):
+    HELD = "held"
+    RELEASED = "released"
+
+
+class LedgerEntryType(StrEnum):
+    BALANCE_ADJUSTMENT = "balance_adjustment"
+    PAYOUT_HOLD = "payout_hold"
+    PAYOUT_HOLD_REVERSAL = "payout_hold_reversal"
+    PLATFORM_FEE = "platform_fee"
+    PLATFORM_FEE_REVERSAL = "platform_fee_reversal"
+
+
 class DisputeStatus(StrEnum):
     OPEN = "open"
     RESOLVED = "resolved"
@@ -84,6 +97,7 @@ class User(Base):
     bets: Mapped[list[Bet]] = relationship(back_populates="user")
     payouts: Mapped[list[Payout]] = relationship(back_populates="user")
     withdrawals: Mapped[list[Withdrawal]] = relationship(back_populates="user")
+    ledger_entries: Mapped[list[LedgerEntry]] = relationship(back_populates="user")
     disputes_raised: Mapped[list[Dispute]] = relationship(
         back_populates="raiser",
         foreign_keys="Dispute.raised_by",
@@ -193,7 +207,10 @@ class Bet(Base):
 
 class Payout(Base):
     __tablename__ = "payouts"
-    __table_args__ = (Index("ix_payouts_market_user", "market_id", "user_id"),)
+    __table_args__ = (
+        Index("ix_payouts_market_user", "market_id", "user_id"),
+        Index("ix_payouts_status_available", "status", "available_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
@@ -207,6 +224,13 @@ class Payout(Base):
         nullable=False,
     )
     credits_won: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[PayoutStatus] = mapped_column(
+        enum_column(PayoutStatus),
+        nullable=False,
+        default=PayoutStatus.HELD,
+    )
+    available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolved_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -215,6 +239,39 @@ class Payout(Base):
 
     user: Mapped[User] = relationship(back_populates="payouts")
     market: Mapped[Market] = relationship(back_populates="payouts")
+
+
+class LedgerEntry(Base):
+    __tablename__ = "ledger_entries"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_ledger_entries_idempotency_key"),
+        Index("ix_ledger_entries_user_created", "user_id", "created_at"),
+        Index("ix_ledger_entries_source", "source_table", "source_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("users.telegram_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(16), nullable=False, default="XTR")
+    entry_type: Mapped[LedgerEntryType] = mapped_column(
+        enum_column(LedgerEntryType),
+        nullable=False,
+    )
+    source_table: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    entry_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+    user: Mapped[User | None] = relationship(back_populates="ledger_entries")
 
 
 class Withdrawal(Base):

@@ -18,8 +18,9 @@ after every meaningful architecture, deployment, environment, or module change.
   - Module 2: webhook secret validation, Telegram Mini App `initData`
     validation, admin check, admin middleware, logging, exception handling.
   - Module 3: SQLAlchemy ORM models, session helpers, PostgreSQL SQL migration,
-    CRUD helpers for users/deposits/markets/bets, and database-layer logging
-    plus exception normalization.
+    CRUD helpers for users/deposits/markets/bets, append-only ledger entry
+    foundation, migration tracking, and database-layer logging plus exception
+    normalization.
   - Module 4: implicit user identity foundation with `ensure_user`,
     Mini App initData identity helper, aiogram DB session middleware, app-level
     DB wiring, `/start` silent user upsert, domain exceptions, persistence error
@@ -44,16 +45,19 @@ after every meaningful architecture, deployment, environment, or module change.
     stake pre-checkout validation, successful stake payment handling,
     idempotent `charge_id` persistence, internal Stars credit-then-debit stake
     recording, creator/minimum/deadline/option/balance validation,
-    probability/payout estimate helpers, normal and inline market card edits,
-    betting router wiring, logging, exception wrapping, and tests.
+    duplicate-bet invoice/pre-checkout rejection, post-payment balance fallback
+    when a paid stake can no longer be placed, probability/payout estimate
+    helpers, normal and inline market card edits, betting router wiring,
+    logging, exception wrapping, and tests.
   - Module 8: Stars resolution and payout distribution. Includes creator-only
     `resolve:{market_id}:{option_index}` callbacks, deadline enforcement,
     resolution keyboards/notifications, proportional winner payout calculation
-    with configurable `PLATFORM_FEE_PCT`, `Payout` row creation, withdrawable
-    Stars accrual through the existing internal balance column, market status
-    and winning option persistence, resolved/cancelled card updates, group
-    result posts, 24-hour grace auto-cancel stake refunds, operation-level
-    logging, provider/persistence/unexpected failure wrapping, and tests.
+    with configurable `PLATFORM_FEE_PCT`, held `Payout` row creation, payout
+    hold ledger entries, platform fee ledger entries, release of winnings only
+    after the 24-hour dispute window, market status and winning option
+    persistence, resolved/cancelled card updates, group result posts, 24-hour
+    grace auto-cancel stake refunds, operation-level logging,
+    provider/persistence/unexpected failure wrapping, and tests.
   - Module 9: manual TON-equivalent withdrawal requests. Includes `/withdraw`
     FSM/direct-args flow, TON wallet validation, withdrawable Stars reservation,
     `Withdrawal` request persistence, admin notifications, admin paid/reject
@@ -67,10 +71,12 @@ after every meaningful architecture, deployment, environment, or module change.
     24-hour post-resolution dispute window, `dispute:{market_id}` callbacks,
     market freezing with `MarketStatus.DISPUTED`, admin dispute notifications,
     admin resolve/reject callbacks, arbitration payout redistribution through
-    the Module 8 resolution service, duplicate-payout guard, `markets.resolved_at`
-    and `disputes.resolution_note` persistence, operation-level logging,
-    exception wrapping, safe callback-answer fallbacks, invalid/unauthorized
-    callback logging, all-admin-notification-failure logging, migration
+    the Module 8 resolution service, duplicate-payout guard, ledger reversal
+    entries for superseded held payouts/platform fees, commit-before-publish
+    handling for dispute/arbitration side effects, `markets.resolved_at` and
+    `disputes.resolution_note` persistence, operation-level logging, exception
+    wrapping, safe callback-answer fallbacks, invalid/unauthorized callback
+    logging, all-admin-notification-failure logging, migration
     `0004_disputes_and_resolved_at.sql`, and tests.
   - Module 11: notifications and scheduler foundation. Includes persistent
     `notification_logs` idempotency, an asyncio background expiry worker started
@@ -93,10 +99,12 @@ after every meaningful architecture, deployment, environment, or module change.
     operation-level logging, explicit validation/persistence/provider exception
     normalization, provider-failure fallbacks, and tests.
   - Module 13: admin operations foundation. Includes `/admin_stats`,
-    `/admin_disputes`, and `/broadcast` admin-only commands, platform stats
-    aggregation, open dispute listing, broadcast FSM with per-user delivery
-    logging, Telegram Stars transaction fetch wrapper, provider/validation
-    error types, admin access checks, and tests.
+    `/admin_disputes`, `/admin_withdrawals`, `/admin_anomalies`, and
+    `/broadcast` admin-only commands, platform stats aggregation, open dispute
+    listing, pending withdrawal queue listing, payment anomaly reporting,
+    broadcast FSM with per-user delivery logging, Telegram Stars transaction
+    fetch wrapper, provider/validation error types, admin access checks, and
+    tests.
   - Module 14: deployment and monitoring hardening. Includes structured JSON or
     pretty logging setup, optional log-file sink, `/health` JSON endpoint with
     database probe and bot status, root `OK` health compatibility for Hugging
@@ -109,7 +117,8 @@ after every meaningful architecture, deployment, environment, or module change.
     Telegram user when a database session is available. Startup still configures
     the global native Telegram Bot Menu Web App `Open` button, and market card
     keyboards now use the resolved webhook-derived `open_url` fallback when
-    `MINI_APP_URL` is absent.
+    `MINI_APP_URL` is absent. `/paysupport` now returns beta payment support
+    intake guidance.
   - Mini App frontend shell: a vanilla HTML/CSS/JS app under `frontend/`
     served at `/app`, with Telegram WebApp bootstrap, first-entry onboarding
     disclaimers, live markets/activity/wallet views, Stars bet and deposit
@@ -158,9 +167,10 @@ after every meaningful architecture, deployment, environment, or module change.
   Do not treat `refundStarPayment` as the main withdrawal rail unless a later
   real Telegram API test proves a safe, compliant pattern.
 - MVP payout preference: Stars-in, manual TON-equivalent payouts in beta.
-  Winners accrue a withdrawable balance in Stars units, then request payout in
-  the Mini App by providing or connecting a TON wallet. Admins review, pay
-  manually, record the TON transaction hash, and mark the request paid.
+  Winner payouts are first held through the 24-hour dispute window, then become
+  withdrawable in Stars units and can be requested in the Mini App by providing
+  or connecting a TON wallet. Admins review, pay manually, record the TON
+  transaction hash, and mark the request paid.
 - Communicate manual payouts transparently during beta. Do not imply instant
   Telegram Stars cashout.
 - Add `/paysupport` and clear Terms before going live with real payments.
@@ -242,15 +252,18 @@ after every meaningful architecture, deployment, environment, or module change.
 - `bot/betting.py`: Module 7 betting service/router. Handles
   `bet:{market_id}:{option_index}` callbacks, collects stake amount, sends
   market-specific Stars invoices, validates stake payment payloads, records
-  direct stakes into `deposits` plus `bets`, updates market cards, and exposes
-  `place_bet`, `validate_bet_request`, `calculate_implied_probability`, and
+  direct stakes into `deposits` plus `bets`, rejects already-participating users
+  before invoice/pre-checkout, credits paid-but-unplaceable stake payments back
+  to withdrawable balance, updates market cards, and exposes `place_bet`,
+  `validate_bet_request`, `calculate_implied_probability`, and
   `estimate_payout`.
 - `bot/resolution.py`: Module 8 resolution service/router. Handles creator
   resolution callbacks, builds resolution keyboards, validates deadline and
   creator ownership, distributes winner payouts in Stars units, records
-  `Payout` rows, accrues withdrawable Stars internally, publishes resolved
-  market cards/results, and can auto-cancel stale unresolved markets with stake
-  refunds.
+  `Payout` rows, accrues withdrawable Stars internally after the hold period,
+  commits resolved state before publishing Telegram side effects, publishes
+  resolved market cards/results, and can auto-cancel stale unresolved markets
+  with stake refunds.
 - `bot/withdrawals.py`: Module 9 manual TON-equivalent payout service/router.
   Handles `/withdraw`, TON wallet and tx hash validation, withdrawable Stars
   reservation, admin review callbacks, paid/rejected status transitions, TON tx
@@ -258,7 +271,8 @@ after every meaningful architecture, deployment, environment, or module change.
 - `bot/fraud.py`: Module 10 anti-fraud/dispute service/router. Handles
   bet-gating checks, suspicious-pattern scoring, user dispute callbacks,
   disputed-market freezing, admin dispute notifications, arbitration callbacks,
-  rejected disputes, and safe logging/exception normalization.
+  rejected disputes, arbitration ledger reversals, commit-before-publish
+  dispute/arbitration side effects, and safe logging/exception normalization.
 - `bot/notifications.py`: Module 11 notification/scheduler service. Handles
   persistent notification idempotency, background expiry scans, deadline
   reminders, closed-market card updates, creator resolution prompts,
@@ -301,7 +315,11 @@ after every meaningful architecture, deployment, environment, or module change.
   `0003_manual_ton_withdrawals.sql` for manual payout audit fields on
   `withdrawals`, and `0004_disputes_and_resolved_at.sql` for
   `markets.resolved_at` plus dispute resolution notes, and
-  `0005_notification_logs.sql` for persistent notification idempotency.
+  `0005_notification_logs.sql` for persistent notification idempotency, and
+  `0006_production_money_hardening.sql` for ledger entries plus payout hold
+  fields.
+- `docs/`: beta Terms, Privacy notice, payment support runbook, and economics
+  scaffold required before public paid launch review.
 - `tests/`: focused tests for config, infrastructure, security helpers, and
   Module 3 database CRUD.
 - `deploy guides/`: user-provided Hugging Face/Cloudflare deployment guide.
@@ -473,6 +491,19 @@ notification and expiry-worker foundation.
     `.venv/bin/python -m pytest -q` passed with 139 tests on 2026-06-09 after
     adding RU/EN Mini App localization with Telegram/browser auto-detection
     and a user-facing language switcher (same pytest-asyncio warnings).
+  - `.venv/bin/python -m compileall api bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 139 tests on 2026-06-10 after
+    audit remediation: payout holds/ledger entries, product Stars limits,
+    banned-user bet gating, 24-hour disputes, stricter TON wallet validation,
+    admin withdrawal/anomaly commands, support/legal docs, migration tracking,
+    batched Mini App feed summaries, and server-driven frontend fee estimates
+    (same pytest-asyncio warnings).
+  - `.venv/bin/python -m compileall api bot tests main.py` and
+    `.venv/bin/python -m pytest -q` passed with 143 tests on 2026-06-10 after
+    architecture hardening for duplicate stake invoice/payment handling,
+    paid-but-unplaceable stake balance fallback, arbitration ledger reversals,
+    and commit-before-publish handling for high-risk Telegram side effects
+    (same pytest-asyncio warnings).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:

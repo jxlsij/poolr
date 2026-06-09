@@ -16,6 +16,7 @@ from bot.crud import (
     DatabaseLayerError,
     RecordNotFoundError,
     create_dispute,
+    create_ledger_entry,
     get_bets_for_market,
     get_open_dispute_for_market,
     get_payouts_for_market,
@@ -23,7 +24,7 @@ from bot.crud import (
     update_dispute_status,
     update_market_status,
 )
-from bot.models import Bet, Deposit, Dispute, DisputeStatus, Market, MarketStatus
+from bot.models import Bet, Deposit, Dispute, DisputeStatus, LedgerEntry, LedgerEntryType, Market, MarketStatus
 from bot.resolution import distribute_payouts, publish_resolution_results
 from bot.security import is_admin
 
@@ -35,7 +36,7 @@ T = TypeVar("T")
 DISPUTE_CALLBACK_PREFIX = "dispute"
 ARBITRATE_CALLBACK_PREFIX = "arbitrate"
 REJECT_DISPUTE_CALLBACK_PREFIX = "reject_dispute"
-DISPUTE_WINDOW = timedelta(hours=2)
+DISPUTE_WINDOW = timedelta(hours=24)
 
 
 class SuspicionLevel(StrEnum):
@@ -254,6 +255,7 @@ async def freeze_market_for_dispute(
         dispute.id,
         raised_by,
     )
+    await session.commit()
     await notify_admins_for_dispute(bot, market, dispute, admin_ids or [])
     return DisputeResult(dispute=dispute, market=market)
 
@@ -285,9 +287,23 @@ async def admin_arbitrate(
 
     if existing_payouts:
         logger.warning(
-            "Skipping automatic payout redistribution for disputed market with existing payouts: market_id=%d payouts=%d",
+            "Cancelling held payouts before arbitration redistribution: market_id=%d payouts=%d",
             market_id,
             len(existing_payouts),
+        )
+        await _reverse_existing_arbitration_ledger(session, market_id, existing_payouts, admin_id)
+        for payout in existing_payouts:
+            if payout.status.value != "held":
+                raise FraudValidationError("This market has released payouts and requires manual ledger repair.")
+            payout.credits_won = 0
+            payout.status = payout.status
+        bets = await get_bets_for_market(session, market_id, for_update=True)
+        payouts, platform_fee_collected = await distribute_payouts(
+            session=session,
+            market=market,
+            winning_option_index=winning_option_index,
+            platform_fee_pct=platform_fee_pct,
+            bets=bets,
         )
     else:
         bets = await get_bets_for_market(session, market_id, for_update=True)
@@ -314,6 +330,7 @@ async def admin_arbitrate(
         )
 
     pool_by_option = await get_pool_by_option(session, market_id)
+    await session.commit()
     try:
         await publish_resolution_results(
             bot=bot,
@@ -340,6 +357,53 @@ async def admin_arbitrate(
         payouts_created=len(payouts),
         platform_fee_collected=platform_fee_collected,
     )
+
+
+async def _reverse_existing_arbitration_ledger(
+    session: AsyncSession,
+    market_id: int,
+    payouts: list[Any],
+    admin_id: int,
+) -> None:
+    for payout in payouts:
+        if payout.status.value != "held":
+            continue
+        if payout.credits_won <= 0:
+            continue
+        await create_ledger_entry(
+            session=session,
+            user_id=payout.user_id,
+            amount=-payout.credits_won,
+            entry_type=LedgerEntryType.PAYOUT_HOLD_REVERSAL,
+            source_table="payouts",
+            source_id=payout.id,
+            idempotency_key=f"payout_hold_reversal:{payout.id}:arbitration",
+            metadata={"market_id": market_id, "admin_id": admin_id},
+        )
+
+    fee_entries = list(
+        (
+            await session.scalars(
+                select(LedgerEntry).where(
+                    LedgerEntry.entry_type == LedgerEntryType.PLATFORM_FEE,
+                    LedgerEntry.source_table == "markets",
+                    LedgerEntry.source_id == str(market_id),
+                    LedgerEntry.amount > 0,
+                )
+            )
+        ).all()
+    )
+    for entry in fee_entries:
+        await create_ledger_entry(
+            session=session,
+            user_id=None,
+            amount=-entry.amount,
+            entry_type=LedgerEntryType.PLATFORM_FEE_REVERSAL,
+            source_table="ledger_entries",
+            source_id=entry.id,
+            idempotency_key=f"platform_fee_reversal:{entry.id}:arbitration",
+            metadata={"market_id": market_id, "admin_id": admin_id},
+        )
 
 
 async def handle_arbitrate_callback(

@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.crud import (
     DatabaseLayerError,
+    DuplicateRecordError,
     RecordNotFoundError,
+    create_ledger_entry,
     create_payout,
     get_bets_for_market,
     get_pool_by_option,
@@ -22,7 +24,7 @@ from bot.crud import (
 )
 from bot.handlers.markets import build_market_card_text
 from bot.market_cards import update_market_card_photo
-from bot.models import Bet, Market, MarketStatus, Payout
+from bot.models import Bet, LedgerEntryType, Market, MarketStatus, Payout, PayoutStatus
 
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ T = TypeVar("T")
 
 RESOLVE_CALLBACK_PREFIX = "resolve"
 RESOLUTION_GRACE_PERIOD = timedelta(hours=24)
+PAYOUT_HOLD_PERIOD = timedelta(hours=24)
 
 
 class ResolutionModuleError(RuntimeError):
@@ -187,6 +190,7 @@ async def handle_resolve_callback(
             resolved_by=resolved_by,
             platform_fee_pct=platform_fee_pct,
         )
+        await session.commit()
     except ResolutionValidationError as exc:
         logger.warning(
             "Resolution rejected: market_id=%d user_id=%s reason=%s",
@@ -336,23 +340,83 @@ async def distribute_payouts(
             user_id=bet.user_id,
             market_id=market.id,
             credits_won=stars_won,
+            available_at=datetime.now(timezone.utc) + PAYOUT_HOLD_PERIOD,
         )
-        await update_user_balance(
+        await create_ledger_entry(
             session=session,
-            telegram_id=bet.user_id,
-            delta=stars_won,
-            reason=f"market_payout:{market.id}",
+            user_id=bet.user_id,
+            amount=stars_won,
+            entry_type=LedgerEntryType.PAYOUT_HOLD,
+            source_table="payouts",
+            source_id=payout.id,
+            idempotency_key=f"payout_hold:{payout.id}",
+            metadata={"market_id": market.id},
         )
         payouts.append(payout)
         logger.info(
-            "Winner payout accrued: market_id=%d user_id=%d stake=%d payout=%d",
+            "Winner payout held: market_id=%d user_id=%d stake=%d payout=%d available_at=%s",
             market.id,
             bet.user_id,
             bet.credits_amount,
             stars_won,
+            payout.available_at,
         )
 
+    if platform_fee_collected:
+        try:
+            await create_ledger_entry(
+                session=session,
+                user_id=None,
+                amount=platform_fee_collected,
+                entry_type=LedgerEntryType.PLATFORM_FEE,
+                source_table="markets",
+                source_id=market.id,
+                idempotency_key=f"platform_fee:{market.id}:{winning_option_index}",
+                metadata={"winning_option": winning_option_index},
+            )
+        except DuplicateRecordError:
+            logger.info("Platform fee ledger entry already exists: market_id=%d", market.id)
+
     return payouts, platform_fee_collected
+
+
+@resolution_operation("release_available_payouts", ResolutionPersistenceError)
+async def release_available_payouts(
+    session: AsyncSession,
+    now: datetime | None = None,
+) -> int:
+    release_now = now or datetime.now(timezone.utc)
+    stmt = (
+        select(Payout)
+        .join(Market, Market.id == Payout.market_id)
+        .where(
+            Payout.status == PayoutStatus.HELD,
+            Payout.available_at <= release_now,
+            Market.status == MarketStatus.RESOLVED,
+        )
+        .with_for_update()
+        .order_by(Payout.available_at.asc(), Payout.id.asc())
+    )
+    payouts = list((await session.scalars(stmt)).all())
+    released = 0
+    for payout in payouts:
+        if payout.credits_won <= 0:
+            payout.status = PayoutStatus.RELEASED
+            payout.released_at = release_now
+            continue
+        await update_user_balance(
+            session=session,
+            telegram_id=payout.user_id,
+            delta=payout.credits_won,
+            reason=f"market_payout_released:{payout.market_id}:{payout.id}",
+        )
+        payout.status = PayoutStatus.RELEASED
+        payout.released_at = release_now
+        released += 1
+    if released:
+        await session.flush()
+    logger.info("Released available payout holds: count=%d", released)
+    return released
 
 
 def calculate_winner_share(
