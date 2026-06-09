@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from urllib.parse import urlparse
@@ -44,6 +45,28 @@ DEFAULT_OPTIONS = ["Yes", "No"]
 INLINE_MARKET_CHAT_ID = 0
 INLINE_DEFAULT_DURATION = timedelta(hours=2)
 INLINE_DEFAULT_MIN_BET = 1
+INLINE_DURATION_CHOICES: tuple[tuple[str, timedelta], ...] = (
+    ("15m", timedelta(minutes=15)),
+    ("45m", timedelta(minutes=45)),
+    ("2h", timedelta(hours=2)),
+    ("1d", timedelta(days=1)),
+    ("7d", timedelta(days=7)),
+)
+INLINE_OPTION_PRESETS: dict[str, list[str]] = {
+    "yn": ["Yes", "No"],
+    "ynm": ["Yes", "No", "Maybe"],
+    "abc4": ["A", "B", "C", "D"],
+    "abc5": ["A", "B", "C", "D", "E"],
+    "abc6": ["A", "B", "C", "D", "E", "F"],
+}
+INLINE_DRAFT_PREFIX = "draft"
+
+
+@dataclass(frozen=True)
+class InlineMarketDraft:
+    question: str
+    options: list[str] | None = None
+    duration: timedelta | None = None
 
 
 class MarketCreationError(RuntimeError):
@@ -212,8 +235,8 @@ async def handle_inline_market_query(
         return
 
     try:
-        question = _validate_question(question)
-        result = build_inline_market_preview_result(question, mini_app_url=mini_app_url)
+        draft = parse_inline_market_draft(question)
+        results = build_inline_market_preview_results(draft, mini_app_url=mini_app_url)
     except MarketCreationValidationError as exc:
         logger.exception(
             "Inline market preview failed: inline_query_id=%s user_id=%s",
@@ -229,11 +252,11 @@ async def handle_inline_market_query(
         )
         return
 
-    await query.answer(results=[result], cache_time=1, is_personal=True)
+    await query.answer(results=results, cache_time=1, is_personal=True)
     logger.info(
-        "Answered inline market query with lazy preview: inline_query_id=%s result_id=%s",
+        "Answered inline market query with lazy previews: inline_query_id=%s results=%d",
         query.id,
-        result.id,
+        len(results),
     )
 
 
@@ -258,7 +281,8 @@ async def handle_chosen_inline_market(
             raise MarketCreationPersistenceError("Could not persist inline message id") from exc
         return
 
-    if not _is_inline_draft_result_id(result.result_id):
+    inline_draft_result = _parse_inline_draft_result_id(result.result_id)
+    if inline_draft_result is None:
         logger.debug(
             "Ignoring chosen inline result without market draft id: result_id=%s",
             result.result_id,
@@ -266,15 +290,18 @@ async def handle_chosen_inline_market(
         return
 
     try:
-        question = _validate_question(result.query)
+        draft = parse_inline_market_draft(result.query)
+        options = _resolve_inline_draft_options(inline_draft_result[0], draft)
+        duration = _resolve_inline_draft_duration(inline_draft_result[1])
+        question = draft.question
         user, _is_new = await ensure_user(session, result.from_user)
-        deadline = datetime.now(timezone.utc) + INLINE_DEFAULT_DURATION
+        deadline = datetime.now(timezone.utc) + duration
         market = await create_market(
             session=session,
             creator_id=user.telegram_id,
             chat_id=INLINE_MARKET_CHAT_ID,
             question=question,
-            options=DEFAULT_OPTIONS,
+            options=options,
             deadline=deadline,
             min_bet=INLINE_DEFAULT_MIN_BET,
         )
@@ -450,6 +477,31 @@ def parse_options_string(options_text: str) -> list[str]:
     return _validate_options(options)
 
 
+def parse_inline_market_draft(query: str) -> InlineMarketDraft:
+    parts = [part.strip() for part in query.split("|")]
+    parts = [part for part in parts if part]
+    if not parts:
+        raise MarketCreationValidationError("Question cannot be empty.")
+    if len(parts) > 3:
+        raise MarketCreationValidationError("Use: question | option 1, option 2 | 2h")
+
+    question = _validate_question(parts[0])
+    options: list[str] | None = None
+    duration: timedelta | None = None
+
+    for raw_part in parts[1:]:
+        parsed_duration = parse_deadline_string(raw_part)
+        if parsed_duration is not None:
+            duration = parsed_duration
+            continue
+        if options is None:
+            options = parse_options_string(raw_part)
+            continue
+        raise MarketCreationValidationError("Use: question | option 1, option 2 | 2h")
+
+    return InlineMarketDraft(question=question, options=options, duration=duration)
+
+
 def build_market_card_text(
     market: Market,
     pool_by_option: dict[int, int],
@@ -560,26 +612,89 @@ def build_inline_market_result(
 def build_inline_market_preview_result(
     question: str,
     mini_app_url: str | None = None,
+    *,
+    options_key: str = "yn",
+    options: list[str] | None = None,
+    duration: timedelta = INLINE_DEFAULT_DURATION,
 ) -> InlineQueryResultArticle:
     question = _validate_question(question)
+    options = _validate_options(options or INLINE_OPTION_PRESETS[options_key])
+    duration = _validate_inline_duration(duration)
+    duration_label = _inline_duration_label(duration)
     return InlineQueryResultArticle(
-        id=_inline_draft_result_id(question),
-        title=question,
-        description=f"Create a Yes/No market, min {INLINE_DEFAULT_MIN_BET} Star",
+        id=_inline_draft_result_id(question, options_key, duration),
+        title=f"{_inline_options_label(options)} · {duration_label}",
+        description=(
+            f"{question} · {len(options)} answers: {', '.join(options[:3])}"
+            f"{'...' if len(options) > 3 else ''}"
+        ),
         input_message_content=InputTextMessageContent(
-            message_text=build_inline_market_preview_text(question),
+            message_text=build_inline_market_preview_text(question, options, duration),
         ),
         reply_markup=build_inline_preview_keyboard(mini_app_url),
     )
 
 
-def build_inline_market_preview_text(question: str) -> str:
+def build_inline_market_preview_results(
+    draft: InlineMarketDraft,
+    mini_app_url: str | None = None,
+) -> list[InlineQueryResultArticle]:
+    question = draft.question
+    selected_duration = draft.duration or INLINE_DEFAULT_DURATION
+    results: list[InlineQueryResultArticle] = []
+
+    if draft.options is not None:
+        for duration in _unique_durations((selected_duration, *[item[1] for item in INLINE_DURATION_CHOICES])):
+            results.append(
+                build_inline_market_preview_result(
+                    question,
+                    mini_app_url=mini_app_url,
+                    options_key="custom",
+                    options=draft.options,
+                    duration=duration,
+                )
+            )
+        return results
+
+    for duration in _unique_durations((selected_duration, *[item[1] for item in INLINE_DURATION_CHOICES])):
+        results.append(
+            build_inline_market_preview_result(
+                question,
+                mini_app_url=mini_app_url,
+                options_key="yn",
+                options=INLINE_OPTION_PRESETS["yn"],
+                duration=duration,
+            )
+        )
+
+    for options_key in ("ynm", "abc4", "abc5", "abc6"):
+        results.append(
+            build_inline_market_preview_result(
+                question,
+                mini_app_url=mini_app_url,
+                options_key=options_key,
+                options=INLINE_OPTION_PRESETS[options_key],
+                duration=selected_duration,
+            )
+        )
+    return results
+
+
+def build_inline_market_preview_text(
+    question: str,
+    options: list[str] | None = None,
+    duration: timedelta = INLINE_DEFAULT_DURATION,
+) -> str:
     question = _validate_question(question)
+    options = _validate_options(options or DEFAULT_OPTIONS)
     return "\n".join(
         [
             "Poolr market",
             "",
             question,
+            "",
+            f"Answers: {', '.join(options)}",
+            f"Closes in: {_inline_duration_label(duration)}",
             "",
             "Creating market...",
         ]
@@ -744,10 +859,76 @@ def _parse_inline_result_market_id(result_id: str) -> int | None:
     return int(raw_market_id)
 
 
-def _inline_draft_result_id(question: str) -> str:
-    digest = sha256(question.encode("utf-8")).hexdigest()[:32]
-    return f"draft:{digest}"
+def _inline_draft_result_id(question: str, options_key: str, duration: timedelta) -> str:
+    duration_minutes = _duration_minutes(duration)
+    digest = sha256(f"{question}|{options_key}|{duration_minutes}".encode("utf-8")).hexdigest()[:24]
+    return f"{INLINE_DRAFT_PREFIX}:{options_key}:{duration_minutes}:{digest}"
 
 
-def _is_inline_draft_result_id(result_id: str) -> bool:
-    return result_id.startswith("draft:")
+def _parse_inline_draft_result_id(result_id: str) -> tuple[str, int] | None:
+    parts = result_id.split(":")
+    if len(parts) != 4 or parts[0] != INLINE_DRAFT_PREFIX:
+        return None
+    options_key = parts[1]
+    if options_key != "custom" and options_key not in INLINE_OPTION_PRESETS:
+        return None
+    try:
+        duration_minutes = int(parts[2])
+    except ValueError:
+        return None
+    return options_key, duration_minutes
+
+
+def _resolve_inline_draft_options(options_key: str, draft: InlineMarketDraft) -> list[str]:
+    if options_key == "custom":
+        if draft.options is None:
+            raise MarketCreationValidationError("Custom options are missing.")
+        return _validate_options(draft.options)
+    return _validate_options(INLINE_OPTION_PRESETS[options_key])
+
+
+def _resolve_inline_draft_duration(duration_minutes: int) -> timedelta:
+    return _validate_inline_duration(timedelta(minutes=duration_minutes))
+
+
+def _validate_inline_duration(duration: timedelta) -> timedelta:
+    if duration < MIN_MARKET_DURATION or duration > MAX_MARKET_DURATION:
+        raise MarketCreationValidationError("Deadline must be between 15m and 7d.")
+    return duration
+
+
+def _duration_minutes(duration: timedelta) -> int:
+    return int(duration.total_seconds() // 60)
+
+
+def _inline_duration_label(duration: timedelta) -> str:
+    for label, choice in INLINE_DURATION_CHOICES:
+        if choice == duration:
+            return label
+    minutes = _duration_minutes(duration)
+    if minutes % (24 * 60) == 0:
+        return f"{minutes // (24 * 60)}d"
+    if minutes % 60 == 0:
+        return f"{minutes // 60}h"
+    return f"{minutes}m"
+
+
+def _inline_options_label(options: list[str]) -> str:
+    if options == DEFAULT_OPTIONS:
+        return "Yes/No"
+    if len(options) <= 3:
+        return "/".join(options)
+    return f"{len(options)} answers"
+
+
+def _unique_durations(durations: tuple[timedelta, ...]) -> list[timedelta]:
+    seen: set[int] = set()
+    unique: list[timedelta] = []
+    for duration in durations:
+        duration = _validate_inline_duration(duration)
+        minutes = _duration_minutes(duration)
+        if minutes in seen:
+            continue
+        seen.add(minutes)
+        unique.append(duration)
+    return unique

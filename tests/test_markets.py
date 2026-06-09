@@ -21,6 +21,7 @@ from bot.handlers.markets import (
     build_market_keyboard,
     handle_chosen_inline_market,
     handle_inline_market_query,
+    parse_inline_market_draft,
     parse_deadline_string,
     parse_options_string,
     publish_market_card,
@@ -190,10 +191,21 @@ def test_build_inline_market_preview_result_has_no_market_buttons() -> None:
     )
 
     assert result.id.startswith("draft:")
-    assert result.title == "Will Max be late?"
+    assert result.title == "Yes/No · 2h"
+    assert result.description.startswith("Will Max be late?")
     assert result.input_message_content.message_text.startswith("Poolr market")
+    assert "Answers: Yes, No" in result.input_message_content.message_text
+    assert "Closes in: 2h" in result.input_message_content.message_text
     assert "Creating market..." in result.input_message_content.message_text
     assert result.reply_markup.inline_keyboard[0][0].callback_data == "inline_market_pending"
+
+
+def test_parse_inline_market_draft_accepts_custom_options_and_deadline() -> None:
+    draft = parse_inline_market_draft("Will Max be late? | Yes, No, Maybe | 1d")
+
+    assert draft.question == "Will Max be late?"
+    assert draft.options == ["Yes", "No", "Maybe"]
+    assert draft.duration == timedelta(days=1)
 
 
 def test_build_inline_market_text_is_compact() -> None:
@@ -218,13 +230,32 @@ async def test_handle_inline_market_query_answers_preview_without_creating_marke
     assert active_markets == []
     assert query.answer_kwargs["cache_time"] == 1
     assert query.answer_kwargs["is_personal"] is True
+    assert len(query.answer_kwargs["results"]) >= 9
     assert query.answer_kwargs["results"][0].id.startswith("draft:")
+    assert query.answer_kwargs["results"][0].title == "Yes/No · 2h"
+    assert any(result.title == "4 answers · 2h" for result in query.answer_kwargs["results"])
+    assert any(result.title == "Yes/No · 15m" for result in query.answer_kwargs["results"])
     assert query.answer_kwargs["results"][0].input_message_content.message_text.startswith(
         "Poolr market"
     )
     assert "Creating market..." in query.answer_kwargs["results"][0].input_message_content.message_text
     assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].callback_data == "inline_market_pending"
     assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].web_app is None
+
+
+@pytest.mark.asyncio
+async def test_handle_inline_market_query_uses_custom_options_and_deadline_previews(session_factory) -> None:
+    query = FakeInlineQuery(query="Will Max be late? | Yes, No, Maybe | 1d")
+
+    async with session_factory() as session:
+        await handle_inline_market_query(query, session)
+        active_markets = await get_active_markets_in_chat(session, INLINE_MARKET_CHAT_ID)
+
+    assert active_markets == []
+    first_result = query.answer_kwargs["results"][0]
+    assert first_result.title == "Yes/No/Maybe · 1d"
+    assert "Answers: Yes, No, Maybe" in first_result.input_message_content.message_text
+    assert "Closes in: 1d" in first_result.input_message_content.message_text
 
 
 @pytest.mark.asyncio
@@ -269,6 +300,35 @@ async def test_handle_chosen_inline_market_creates_market_and_updates_inline_mes
     assert bot.edited_messages[0]["reply_markup"].inline_keyboard[-1][0].url == (
         f"https://t.me/pooolr_bot/poolr?startapp=market_{market.id}"
     )
+
+
+@pytest.mark.asyncio
+async def test_handle_chosen_inline_market_creates_custom_options_and_deadline(session_factory) -> None:
+    query_text = "Will Max be late? | Yes, No, Maybe | 1d"
+    bot = FakeBot()
+    async with session_factory() as session:
+        query = FakeInlineQuery(query=query_text)
+        await handle_inline_market_query(query, session)
+        draft_result_id = query.answer_kwargs["results"][0].id
+        before = datetime.now(timezone.utc)
+
+        await handle_chosen_inline_market(
+            FakeChosenInlineResult(result_id=draft_result_id, query=query_text),
+            session,
+            bot=bot,
+            mini_app_url="https://t.me/pooolr_bot/poolr",
+        )
+        after = datetime.now(timezone.utc)
+        active_markets = await get_active_markets_in_chat(session, INLINE_MARKET_CHAT_ID)
+        market = active_markets[0]
+
+    assert market.options == ["Yes", "No", "Maybe"]
+    market_deadline = market.deadline
+    if market_deadline.tzinfo is None:
+        market_deadline = market_deadline.replace(tzinfo=timezone.utc)
+    assert before + timedelta(days=1) <= market_deadline <= after + timedelta(days=1)
+    assert "Yes: 0 Stars" in bot.edited_messages[0]["text"]
+    assert bot.edited_messages[0]["reply_markup"].inline_keyboard[2][0].callback_data == f"bet:{market.id}:2"
 
 
 @pytest.mark.asyncio

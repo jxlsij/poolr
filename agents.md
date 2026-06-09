@@ -35,9 +35,10 @@ after every meaningful architecture, deployment, environment, or module change.
     aiogram FSM states, question/options/deadline/min-stake validation, market
     row creation, market card publishing/updating helpers, `message_id`
     persistence, lazy inline preview generation that does not write rows during
-    typing, `chosen_inline_result` market creation, `inline_message_id`
-    persistence, bet buttons for Module 7, logging, exception wrapping, and
-    tests.
+    typing, inline answer-count/deadline preview choices, custom inline syntax
+    `question | option 1, option 2 | 2h`, `chosen_inline_result` market
+    creation, `inline_message_id` persistence, bet buttons for Module 7,
+    logging, exception wrapping, and tests.
   - Module 7: betting engine and market card updates. Includes bet callback
     parsing, stake amount FSM prompt, market-specific Stars invoice payloads,
     stake pre-checkout validation, successful stake payment handling,
@@ -276,12 +277,14 @@ after every meaningful architecture, deployment, environment, or module change.
   be late?` also starts creation when Telegram routes the mention to the bot.
   Telegram Inline Mode is implemented through lazy `inline_query` previews and
   `chosen_inline_result`: `@pooolr_bot Will Max be late?` shows a draft inline
-  article while the user types, creates the market only after the user chooses
-  that result, then edits the inline message with default Yes/No options,
-  2-hour deadline, 1 Star min stake, callback data
-  `bet:{market_id}:{option_index}` for Module 7, and an `Open event` direct Mini
-  App link like `https://t.me/pooolr_bot/poolr?startapp=market_{market_id}` so
-  Telegram opens the Mini App natively instead of showing the raw `hf.space`
+  article while the user types, with selectable deadline presets
+  `15m/45m/2h/1d/7d`, answer-count presets from 2-6 answers, and custom syntax
+  `question | option 1, option 2, option 3 | 1d` for named options. It creates
+  the market only after the user chooses a result, then edits the inline message
+  with the selected options, 1 Star min stake, callback data
+  `bet:{market_id}:{option_index}` for Module 7, and an `Open event` direct
+  Mini App link like `https://t.me/pooolr_bot/poolr?startapp=market_{market_id}`
+  so Telegram opens the Mini App natively instead of showing the raw `hf.space`
   URL prompt.
 - `bot/security.py`: Module 2 security functions and `AdminMiddleware`.
 - `bot/handlers/start.py`: `/start` handler and start-message composition; the
@@ -457,6 +460,12 @@ notification and expiry-worker foundation.
     changing inline mode to lazy market creation on `chosen_inline_result`
     instead of writing markets during `inline_query` typing (same
     pytest-asyncio warnings).
+  - `.venv/bin/python -m compileall api bot tests main.py`,
+    `.venv/bin/python -m pytest tests/test_markets.py -q`, and
+    `.venv/bin/python -m pytest -q` passed with 139 tests on 2026-06-09 after
+    adding inline market answer-count/deadline choices and custom
+    `question | options | deadline` parsing while keeping creation lazy on
+    `chosen_inline_result` (same pytest-asyncio warnings).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
 - After deployment changes, verify:
