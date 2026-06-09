@@ -8,12 +8,13 @@ from aiogram.types import User as TelegramUser
 from PIL import Image
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from bot.crud import get_active_markets_in_chat, get_market
+from bot.crud import create_market, create_or_get_user, get_active_markets_in_chat, get_market
 from bot.database import create_all_tables, create_session_factory
 from bot.handlers.markets import (
     INLINE_MARKET_CHAT_ID,
     MarketCreationPersistenceError,
     build_market_card_text,
+    build_inline_market_preview_result,
     build_inline_market_result,
     build_inline_market_text,
     build_market_url,
@@ -93,9 +94,18 @@ class FakeChosenInlineResult:
     def __init__(
         self,
         result_id: str,
+        query: str = "Will Max be late?",
+        user_id: int = 101,
         inline_message_id: str | None = "inline-message-id",
     ) -> None:
         self.result_id = result_id
+        self.query = query
+        self.from_user = TelegramUser(
+            id=user_id,
+            is_bot=False,
+            first_name="Ada",
+            username="ada",
+        )
         self.inline_message_id = inline_message_id
 
 
@@ -173,6 +183,19 @@ def test_build_inline_market_result() -> None:
     assert result.reply_markup.inline_keyboard[-1][0].web_app is None
 
 
+def test_build_inline_market_preview_result_has_no_market_buttons() -> None:
+    result = build_inline_market_preview_result(
+        "Will Max be late?",
+        mini_app_url="https://t.me/pooolr_bot/poolr",
+    )
+
+    assert result.id.startswith("draft:")
+    assert result.title == "Will Max be late?"
+    assert result.input_message_content.message_text.startswith("Poolr market")
+    assert "Creating market..." in result.input_message_content.message_text
+    assert result.reply_markup.inline_keyboard[0][0].callback_data == "inline_market_pending"
+
+
 def test_build_inline_market_text_is_compact() -> None:
     text = build_inline_market_text(_market(), {0: 25, 1: 75})
 
@@ -184,7 +207,7 @@ def test_build_inline_market_text_is_compact() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_inline_market_query_creates_market_and_answers(session_factory) -> None:
+async def test_handle_inline_market_query_answers_preview_without_creating_market(session_factory) -> None:
     query = FakeInlineQuery()
 
     async with session_factory() as session:
@@ -192,18 +215,15 @@ async def test_handle_inline_market_query_creates_market_and_answers(session_fac
 
         active_markets = await get_active_markets_in_chat(session, INLINE_MARKET_CHAT_ID)
 
-    assert len(active_markets) == 1
-    assert active_markets[0].question == "Will Max be late?"
-    assert active_markets[0].options == ["Yes", "No"]
+    assert active_markets == []
     assert query.answer_kwargs["cache_time"] == 1
     assert query.answer_kwargs["is_personal"] is True
-    assert query.answer_kwargs["results"][0].id == f"market:{active_markets[0].id}"
+    assert query.answer_kwargs["results"][0].id.startswith("draft:")
     assert query.answer_kwargs["results"][0].input_message_content.message_text.startswith(
-        f"Poolr market #{active_markets[0].id}"
+        "Poolr market"
     )
-    assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].url == (
-        f"https://t.me/pooolr_bot/poolr?startapp=market_{active_markets[0].id}"
-    )
+    assert "Creating market..." in query.answer_kwargs["results"][0].input_message_content.message_text
+    assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].callback_data == "inline_market_pending"
     assert query.answer_kwargs["results"][0].reply_markup.inline_keyboard[-1][0].web_app is None
 
 
@@ -223,20 +243,59 @@ async def test_handle_inline_market_query_answers_empty_query_without_market(
 
 
 @pytest.mark.asyncio
-async def test_handle_chosen_inline_market_saves_inline_message_id(session_factory) -> None:
+async def test_handle_chosen_inline_market_creates_market_and_updates_inline_message(session_factory) -> None:
+    bot = FakeBot()
     async with session_factory() as session:
         query = FakeInlineQuery()
         await handle_inline_market_query(query, session)
-        market_id = int(query.answer_kwargs["results"][0].id.removeprefix("market:"))
+        draft_result_id = query.answer_kwargs["results"][0].id
 
         await handle_chosen_inline_market(
-            FakeChosenInlineResult(result_id=f"market:{market_id}"),
+            FakeChosenInlineResult(result_id=draft_result_id),
             session,
+            bot=bot,
+            mini_app_url="https://t.me/pooolr_bot/poolr",
         )
-        market = await get_market(session, market_id)
+        active_markets = await get_active_markets_in_chat(session, INLINE_MARKET_CHAT_ID)
+        market = active_markets[0]
 
     assert market is not None
+    assert market.question == "Will Max be late?"
+    assert market.options == ["Yes", "No"]
     assert market.inline_message_id == "inline-message-id"
+    assert bot.edited_messages[0]["inline_message_id"] == "inline-message-id"
+    assert bot.edited_messages[0]["text"].startswith(f"Poolr market #{market.id}")
+    assert bot.edited_messages[0]["reply_markup"].inline_keyboard[0][0].callback_data == f"bet:{market.id}:0"
+    assert bot.edited_messages[0]["reply_markup"].inline_keyboard[-1][0].url == (
+        f"https://t.me/pooolr_bot/poolr?startapp=market_{market.id}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_chosen_inline_market_keeps_legacy_market_result_support(session_factory) -> None:
+    async with session_factory() as session:
+        query = FakeInlineQuery()
+        await handle_inline_market_query(query, session)
+
+        await create_or_get_user(session, 101, "ada", "Ada")
+        market = await create_market(
+            session,
+            creator_id=101,
+            chat_id=INLINE_MARKET_CHAT_ID,
+            question="Will Max be late?",
+            options=["Yes", "No"],
+            deadline=datetime.now(timezone.utc) + timedelta(hours=2),
+            min_bet=1,
+        )
+
+        await handle_chosen_inline_market(
+            FakeChosenInlineResult(result_id=f"market:{market.id}"),
+            session,
+        )
+        reloaded = await get_market(session, market.id)
+
+    assert reloaded is not None
+    assert reloaded.inline_message_id == "inline-message-id"
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from urllib.parse import urlparse
 
 from aiogram import Bot, F, Router
@@ -11,6 +12,7 @@ from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    CallbackQuery,
     ChosenInlineResult,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -90,8 +92,13 @@ def create_markets_router(mini_app_url: str | None = None) -> Router:
     async def chosen_inline_market_handler(
         result: ChosenInlineResult,
         db_session: AsyncSession,
+        bot: Bot,
     ) -> None:
-        await handle_chosen_inline_market(result, db_session)
+        await handle_chosen_inline_market(result, db_session, bot, mini_app_url)
+
+    @router.callback_query(F.data == "inline_market_pending")
+    async def inline_market_pending_handler(callback: CallbackQuery) -> None:
+        await callback.answer("Creating market...")
 
     @router.message(MarketCreationStates.waiting_question)
     async def question_input_handler(message: Message, state: FSMContext) -> None:
@@ -183,7 +190,7 @@ async def handle_mention_market(message: Message, state: FSMContext) -> None:
 
 async def handle_inline_market_query(
     query: InlineQuery,
-    session: AsyncSession,
+    _session: AsyncSession,
     mini_app_url: str | None = None,
 ) -> None:
     question = query.query.strip()
@@ -206,7 +213,61 @@ async def handle_inline_market_query(
 
     try:
         question = _validate_question(question)
-        user, _is_new = await ensure_user(session, query.from_user)
+        result = build_inline_market_preview_result(question, mini_app_url=mini_app_url)
+    except MarketCreationValidationError as exc:
+        logger.exception(
+            "Inline market preview failed: inline_query_id=%s user_id=%s",
+            query.id,
+            query.from_user.id,
+        )
+        await query.answer(
+            results=[],
+            cache_time=1,
+            is_personal=True,
+            switch_pm_text=str(exc),
+            switch_pm_parameter="inline-error",
+        )
+        return
+
+    await query.answer(results=[result], cache_time=1, is_personal=True)
+    logger.info(
+        "Answered inline market query with lazy preview: inline_query_id=%s result_id=%s",
+        query.id,
+        result.id,
+    )
+
+
+async def handle_chosen_inline_market(
+    result: ChosenInlineResult,
+    session: AsyncSession,
+    bot: Bot | None = None,
+    mini_app_url: str | None = None,
+) -> None:
+    market_id = _parse_inline_result_market_id(result.result_id)
+    if market_id is not None:
+        if result.inline_message_id is None:
+            logger.debug(
+                "Ignoring chosen persisted inline result without message id: result_id=%s",
+                result.result_id,
+            )
+            return
+        try:
+            await update_market_inline_message_id(session, market_id, result.inline_message_id)
+        except DatabaseLayerError as exc:
+            logger.exception("Could not persist inline message id: market_id=%d", market_id)
+            raise MarketCreationPersistenceError("Could not persist inline message id") from exc
+        return
+
+    if not _is_inline_draft_result_id(result.result_id):
+        logger.debug(
+            "Ignoring chosen inline result without market draft id: result_id=%s",
+            result.result_id,
+        )
+        return
+
+    try:
+        question = _validate_question(result.query)
+        user, _is_new = await ensure_user(session, result.from_user)
         deadline = datetime.now(timezone.utc) + INLINE_DEFAULT_DURATION
         market = await create_market(
             session=session,
@@ -217,52 +278,24 @@ async def handle_inline_market_query(
             deadline=deadline,
             min_bet=INLINE_DEFAULT_MIN_BET,
         )
-        pool_by_option = await get_pool_by_option(session, market.id)
-        result = build_inline_market_result(
-            market=market,
-            pool_by_option=pool_by_option,
-            mini_app_url=mini_app_url,
-        )
+        if result.inline_message_id is not None:
+            await update_market_inline_message_id(session, market.id, result.inline_message_id)
+            if bot is not None:
+                pool_by_option = await get_pool_by_option(session, market.id)
+                await update_inline_market_card(
+                    bot=bot,
+                    inline_message_id=result.inline_message_id,
+                    market=market,
+                    pool_by_option=pool_by_option,
+                    mini_app_url=mini_app_url,
+                )
     except (MarketCreationValidationError, UserModuleError, DatabaseLayerError) as exc:
         logger.exception(
-            "Inline market creation failed: inline_query_id=%s user_id=%s",
-            query.id,
-            query.from_user.id,
-        )
-        await query.answer(
-            results=[],
-            cache_time=1,
-            is_personal=True,
-            switch_pm_text="Could not create this market",
-            switch_pm_parameter="inline-error",
-        )
-        raise MarketCreationPersistenceError("Inline market creation failed") from exc
-
-    await query.answer(results=[result], cache_time=1, is_personal=True)
-    logger.info(
-        "Answered inline market query: inline_query_id=%s market_id=%d",
-        query.id,
-        market.id,
-    )
-
-
-async def handle_chosen_inline_market(
-    result: ChosenInlineResult,
-    session: AsyncSession,
-) -> None:
-    market_id = _parse_inline_result_market_id(result.result_id)
-    if market_id is None or result.inline_message_id is None:
-        logger.debug(
-            "Ignoring chosen inline result without market id/message id: result_id=%s",
+            "Chosen inline market creation failed: result_id=%s user_id=%s",
             result.result_id,
+            result.from_user.id,
         )
-        return
-
-    try:
-        await update_market_inline_message_id(session, market_id, result.inline_message_id)
-    except DatabaseLayerError as exc:
-        logger.exception("Could not persist inline message id: market_id=%d", market_id)
-        raise MarketCreationPersistenceError("Could not persist inline message id") from exc
+        raise MarketCreationPersistenceError("Chosen inline market creation failed") from exc
 
 
 async def process_question_input(message: Message, state: FSMContext) -> None:
@@ -524,6 +557,41 @@ def build_inline_market_result(
     )
 
 
+def build_inline_market_preview_result(
+    question: str,
+    mini_app_url: str | None = None,
+) -> InlineQueryResultArticle:
+    question = _validate_question(question)
+    return InlineQueryResultArticle(
+        id=_inline_draft_result_id(question),
+        title=question,
+        description=f"Create a Yes/No market, min {INLINE_DEFAULT_MIN_BET} Star",
+        input_message_content=InputTextMessageContent(
+            message_text=build_inline_market_preview_text(question),
+        ),
+        reply_markup=build_inline_preview_keyboard(mini_app_url),
+    )
+
+
+def build_inline_market_preview_text(question: str) -> str:
+    question = _validate_question(question)
+    return "\n".join(
+        [
+            "Poolr market",
+            "",
+            question,
+            "",
+            "Creating market...",
+        ]
+    )
+
+
+def build_inline_preview_keyboard(_mini_app_url: str | None = None) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Creating...", callback_data="inline_market_pending")]]
+    )
+
+
 async def publish_market_card(
     bot: Bot,
     chat_id: int,
@@ -674,3 +742,12 @@ def _parse_inline_result_market_id(result_id: str) -> int | None:
     if not raw_market_id.isdigit():
         return None
     return int(raw_market_id)
+
+
+def _inline_draft_result_id(question: str) -> str:
+    digest = sha256(question.encode("utf-8")).hexdigest()[:32]
+    return f"draft:{digest}"
+
+
+def _is_inline_draft_result_id(result_id: str) -> bool:
+    return result_id.startswith("draft:")

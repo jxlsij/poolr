@@ -33,10 +33,11 @@ after every meaningful architecture, deployment, environment, or module change.
     for chats where the bot is present, and Telegram Inline Mode support for
     `@pooolr_bot question` in chats where the bot is not present. Includes
     aiogram FSM states, question/options/deadline/min-stake validation, market
-    row creation,
-    market card publishing/updating helpers, `message_id` persistence, inline
-    result/card generation, `inline_message_id` persistence, bet buttons for
-    Module 7, logging, exception wrapping, and tests.
+    row creation, market card publishing/updating helpers, `message_id`
+    persistence, lazy inline preview generation that does not write rows during
+    typing, `chosen_inline_result` market creation, `inline_message_id`
+    persistence, bet buttons for Module 7, logging, exception wrapping, and
+    tests.
   - Module 7: betting engine and market card updates. Includes bet callback
     parsing, stake amount FSM prompt, market-specific Stars invoice payloads,
     stake pre-checkout validation, successful stake payment handling,
@@ -191,7 +192,9 @@ after every meaningful architecture, deployment, environment, or module change.
   Suggested placeholder: `Ask a prediction question`.
 - Optional but recommended: enable `/setinlinefeedback` in BotFather so Telegram
   sends `chosen_inline_result` updates; the code stores `inline_message_id` when
-  those updates arrive.
+  those updates arrive. Inline markets are created only from
+  `chosen_inline_result`, not from every `inline_query` while the user is still
+  typing.
 
 ## Project Layout
 
@@ -271,13 +274,15 @@ after every meaningful architecture, deployment, environment, or module change.
   helpers. `/bet` starts creation; inline question syntax `/bet Will Max be
   late?` skips directly to options. Mention syntax like `@pooolr_bot Will Max
   be late?` also starts creation when Telegram routes the mention to the bot.
-  Telegram Inline Mode is implemented through `inline_query` and
-  `chosen_inline_result`: `@pooolr_bot Will Max be late?` returns a compact
-  text inline article with default Yes/No options, 2-hour deadline, 1 Star min
-  stake, callback data `bet:{market_id}:{option_index}` for Module 7, and an
-  `Open event` direct Mini App link like
-  `https://t.me/pooolr_bot/poolr?startapp=market_{market_id}` so Telegram opens
-  the Mini App natively instead of showing the raw `hf.space` URL prompt.
+  Telegram Inline Mode is implemented through lazy `inline_query` previews and
+  `chosen_inline_result`: `@pooolr_bot Will Max be late?` shows a draft inline
+  article while the user types, creates the market only after the user chooses
+  that result, then edits the inline message with default Yes/No options,
+  2-hour deadline, 1 Star min stake, callback data
+  `bet:{market_id}:{option_index}` for Module 7, and an `Open event` direct Mini
+  App link like `https://t.me/pooolr_bot/poolr?startapp=market_{market_id}` so
+  Telegram opens the Mini App natively instead of showing the raw `hf.space`
+  URL prompt.
 - `bot/security.py`: Module 2 security functions and `AdminMiddleware`.
 - `bot/handlers/start.py`: `/start` handler and start-message composition; the
   Open button is configured globally in `main.py` through Telegram Bot Menu.
@@ -445,6 +450,12 @@ notification and expiry-worker foundation.
     `.venv/bin/python -m pytest -q` passed with 134 tests on 2026-06-09 after
     limiting the Mini App market feed to public `chat_id = 0` markets while
     preserving direct message-button access to group/private markets (same
+    pytest-asyncio warnings).
+  - `.venv/bin/python -m compileall api bot tests main.py`,
+    `.venv/bin/python -m pytest tests/test_markets.py -q`, and
+    `.venv/bin/python -m pytest -q` passed with 136 tests on 2026-06-09 after
+    changing inline mode to lazy market creation on `chosen_inline_result`
+    instead of writing markets during `inline_query` typing (same
     pytest-asyncio warnings).
 - `requirements-dev.txt` includes `pytest`; use a virtualenv to run the full
   test suite.
