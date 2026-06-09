@@ -55,7 +55,9 @@ class PayoutStatus(StrEnum):
 class LedgerEntryType(StrEnum):
     BALANCE_ADJUSTMENT = "balance_adjustment"
     PAYOUT_HOLD = "payout_hold"
+    PAYOUT_HOLD_REVERSAL = "payout_hold_reversal"
     PLATFORM_FEE = "platform_fee"
+    PLATFORM_FEE_REVERSAL = "platform_fee_reversal"
 
 
 class DisputeStatus(StrEnum):

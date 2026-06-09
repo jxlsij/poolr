@@ -505,6 +505,7 @@ async def handle_withdraw_reject_callback(
             admin_id=admin_id,
             admin_note="Rejected by admin from bot callback.",
         )
+        await session.commit()
         await notify_user_withdrawal_rejected(bot, result.withdrawal)
         await _answer_callback(callback, "Payout request rejected and Stars returned.")
     except WithdrawalValidationError as exc:
@@ -546,6 +547,7 @@ async def process_admin_tx_hash(
             admin_id=admin_id,
             ton_tx_hash=tx_hash,
         )
+        await session.commit()
         await notify_user_withdrawal_paid(bot, result.withdrawal)
         await message.answer(f"Payout #{withdrawal_id} marked paid.")
     except WithdrawalValidationError as exc:

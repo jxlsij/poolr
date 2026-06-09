@@ -175,18 +175,14 @@ async def handle_successful_payment(
             from bot.betting import (
                 BettingModuleError,
                 handle_successful_stake_payment,
-                validate_stake_pre_checkout,
             )
 
-            validation_error = await validate_stake_pre_checkout(
-                session=session,
-                payload=payload,
-                payer_id=payer_id,
+            _validate_stars_payment(
                 currency=payment.currency,
                 total_amount=payment.total_amount,
+                payload={"user_id": payload["user_id"], "stars_amount": payload["stars_amount"]},
+                payer_id=payer_id,
             )
-            if validation_error is not None:
-                raise PaymentValidationError(validation_error.value)
             try:
                 await handle_successful_stake_payment(
                     message=message,

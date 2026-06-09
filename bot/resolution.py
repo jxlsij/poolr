@@ -190,6 +190,7 @@ async def handle_resolve_callback(
             resolved_by=resolved_by,
             platform_fee_pct=platform_fee_pct,
         )
+        await session.commit()
     except ResolutionValidationError as exc:
         logger.warning(
             "Resolution rejected: market_id=%d user_id=%s reason=%s",

@@ -233,6 +233,59 @@ async def test_stake_payment_records_bet_and_updates_market_card(session_factory
     assert message.answers == ["Bet placed: 10 Stars."]
 
 
+@pytest.mark.asyncio
+async def test_pre_checkout_rejects_existing_market_bet(session_factory) -> None:
+    async with session_factory() as session:
+        market = await _create_users_and_market(session)
+        await update_user_balance(session, 202, 10, "test_balance")
+        await place_bet(session, 202, market.id, 0, 10)
+        payload = build_stake_invoice_payload(
+            user_id=202,
+            market_id=market.id,
+            option_index=1,
+            stars_amount=10,
+        )
+
+        pre_checkout = FakePreCheckoutQuery(payload)
+        await handle_pre_checkout_query(pre_checkout, session)
+
+    assert pre_checkout.answer_kwargs is not None
+    assert pre_checkout.answer_kwargs["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_duplicate_successful_stake_payment_is_credited_not_lost(session_factory) -> None:
+    bot = FakeBot()
+
+    async with session_factory() as session:
+        market = await _create_users_and_market(session)
+        await update_user_balance(session, 202, 10, "test_balance")
+        await place_bet(session, 202, market.id, 0, 10)
+        payload = build_stake_invoice_payload(
+            user_id=202,
+            market_id=market.id,
+            option_index=1,
+            stars_amount=10,
+        )
+
+        message = FakePaymentMessage(payload, bot, charge_id="duplicate-stake-charge")
+        await handle_successful_payment(message, session)
+
+        bettor = await get_user_by_id(session, 202)
+        deposit = await get_deposit_by_charge_id(session, "duplicate-stake-charge")
+        bet = await get_user_bet_on_market(session, 202, market.id)
+
+    assert bettor is not None
+    assert bettor.balance_credits == 10
+    assert deposit is not None
+    assert deposit.status == DepositStatus.CONFIRMED
+    assert bet is not None
+    assert bet.option_index == 0
+    assert message.answers == [
+        "Payment received, but this stake could not be placed. 10 Stars were added to your withdrawable balance."
+    ]
+
+
 async def _create_users_and_market(session) -> Market:
     await create_or_get_user(session, 101, "ada", "Ada")
     await create_or_get_user(session, 202, "grace", "Grace")

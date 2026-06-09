@@ -18,7 +18,7 @@ from bot.betting import (
     BetValidationError,
     estimate_payout,
     send_stake_invoice,
-    validate_stake_invoice_request,
+    validate_stake_invoice_request_for_user,
 )
 from bot.crud import (
     DatabaseLayerError,
@@ -358,7 +358,8 @@ async def api_place_bet(request: web.Request) -> web.Response:
         if market is None:
             raise ApiNotFoundError("Market was not found.", code="market_not_found")
 
-        validation_error = validate_stake_invoice_request(
+        validation_error = await validate_stake_invoice_request_for_user(
+            session=ctx.session,
             user=ctx.user,
             market=market,
             option_index=option_index,
